@@ -103,7 +103,12 @@ public:
 
 	bool IsAlive() const { return m_Alive; }
 	class CPlayer *GetPlayer() { return m_pPlayer; }
-	
+	class CCharacterCore *GetCore() { return &m_Core;}
+	bool CanFire() const { return m_ReloadTimer <= 0; }
+	int GetHealth() const { return m_Health; }
+	int GetArmor() const { return m_Armor; }
+	int GetAmmoCount(int Weapon) const { return m_aWeapons[clamp(Weapon, 0,NUM_WEAPONS-1)].m_Ammo; }
+
 	void GiveNinjaBuf();
 
 protected:

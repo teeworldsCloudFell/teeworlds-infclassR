@@ -1059,7 +1059,28 @@ void CGameContext::OnTick()
 	
 	// check tuning
 	CheckPureTuning();
-	
+
+	// Check bot number
+	CheckBotNumber();
+
+	// OnPredictedInput for bots
+	if (!m_World.m_Paused) {
+		for(int i = 0; i < MAX_CLIENTS ; i++)
+		{
+			if(!m_apPlayers[i] || !m_apPlayers[i]->IsBot())
+				continue;
+			CNetObj_PlayerInput Input = m_apPlayers[i]->m_pBot->GetLastInputData();
+			m_apPlayers[i]->OnPredictedInput(&Input);
+		}
+	}
+	for(int i = 0; i < MAX_CLIENTS ; i++)
+	{
+		if(!m_apPlayers[i] || !m_apPlayers[i]->IsBot())
+			continue;
+		CNetObj_PlayerInput Input = m_apPlayers[i]->m_pBot->GetInputData();
+		m_apPlayers[i]->OnDirectInput(&Input);
+	}
+
 	m_Collision.SetTime(m_pController->GetTime());
 
 	//update hook protection in core

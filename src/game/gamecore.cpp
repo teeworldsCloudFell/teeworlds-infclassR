@@ -82,7 +82,7 @@ void CCharacterCore::Reset()
 	m_ProbablyStucked = false;
 }
 
-void CCharacterCore::Tick(bool UseInput, CParams* pParams)
+void CCharacterCore::Tick(bool UseInput, const CParams *pParams)
 {
 	const CTuningParams* pTuningParams = pParams->m_pTuningParams;
 	m_TriggeredEvents = 0;
@@ -413,7 +413,7 @@ void CCharacterCore::Tick(bool UseInput, CParams* pParams)
 		m_Vel = normalize(m_Vel) * 6000;
 }
 
-void CCharacterCore::Move(CParams* pParams)
+void CCharacterCore::Move(const CParams *pParams)
 {
 	const CTuningParams* pTuningParams = pParams->m_pTuningParams;
 	

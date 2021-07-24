@@ -248,8 +248,8 @@ public:
 
 	void Init(CWorldCore *pWorld, CCollision *pCollision);
 	void Reset();
-	void Tick(bool UseInput, CParams* pParams);
-	void Move(CParams* pParams);
+	void Tick(bool UseInput, const CParams *pParams);
+	void Move(const CParams *pParams);
 
 	void Read(const CNetObj_CharacterCore *pObjCore);
 	void Write(CNetObj_CharacterCore *pObjCore);

@@ -31,6 +31,19 @@ MACRO_CONFIG_INT(SvMapUpdateRate, sv_mapupdaterate, 5, 1, 100, CFGFLAG_SERVER, "
 
 MACRO_CONFIG_INT(SvSkinStealAction, sv_skinstealaction, 0, 0, 1, CFGFLAG_SERVER, "How to punish skin stealing (currently only 1 = force pinky)")
 
+//Server Bots
+MACRO_CONFIG_INT(SvBotSlots, sv_bot_slots, 2, 0, MAX_CLIENTS, CFGFLAG_SERVER, "Number of slots to reserve for bots")
+MACRO_CONFIG_INT(SvBotAllowHook, sv_bot_allow_hook, 1, 0, 1, CFGFLAG_SERVER, "Bots are allowed to hook")
+MACRO_CONFIG_INT(SvBotAllowMove, sv_bot_allow_move, 1, 0, 1, CFGFLAG_SERVER, "Bots are allowed to move")
+MACRO_CONFIG_INT(SvBotAllowFire, sv_bot_allow_fire, 1, 0, 1, CFGFLAG_SERVER, "Bots fire")
+MACRO_CONFIG_INT(SvBotAccuracyError, sv_bot_accuracy, 1, 0, 1, CFGFLAG_SERVER, "Random accuracy error for bots")
+
+MACRO_CONFIG_INT(SvBotAlwaysEnable, sv_bot_always_enable, 1, 0, 2, CFGFLAG_SERVER, "Make the bots stay(=1)/play(=2) even without clients")
+
+MACRO_CONFIG_INT(SvBotSmoothPath, sv_bot_smooth_path, 1, 0, 10, CFGFLAG_SERVER, "Bot path smooth iterations")
+MACRO_CONFIG_INT(SvBotDrawTarget, sv_bot_draw_target, 0, 0, 1, CFGFLAG_SERVER, "Show bot target")
+MACRO_CONFIG_INT(SvBotEngineDrawGraph, sv_botengine_draw_graph, 0, 0, 1, CFGFLAG_SERVER, "Draw graph")
+
 // debug
 #ifdef CONF_DEBUG // this one can crash the server if not used correctly
 	MACRO_CONFIG_INT(DbgDummies, dbg_dummies, 0, 0, 15, CFGFLAG_SERVER, "")

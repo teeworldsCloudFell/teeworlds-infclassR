@@ -580,6 +580,10 @@ set_glob(ENGINE_SERVER GLOB src/engine/server
 
 set_glob(GAME_SERVER GLOB_RECURSE src/game/server
   alloc.h
+  bot.cpp
+  bot.h
+  botengine.cpp
+  botengine.h
   entities/character.cpp
   entities/character.h
   entities/projectile.cpp
