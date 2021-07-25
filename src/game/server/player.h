@@ -28,7 +28,7 @@ public:
 	void SetTeam(int Team, bool DoChatMsg=true);
 	int GetTeam() const { return m_Team; };
 	int GetCID() const { return m_ClientID; };
-	virtual bool IsBot() const { return false; }
+	virtual bool IsBot() const { return m_pBot; }
 
 	virtual void Tick();
 	void PostTick();
@@ -105,6 +105,8 @@ public:
 		int m_Min;
 		int m_Max;
 	} m_Latency;
+
+	class CBot *m_pBot;
 
 protected:
 	CCharacter *m_pCharacter;

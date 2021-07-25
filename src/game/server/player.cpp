@@ -4,9 +4,10 @@
 #include <iostream>
 #include <engine/shared/config.h>
 #include "player.h"
+#include "bot.h"
+
 #include <engine/shared/network.h>
 #include <engine/server/roundstatistics.h>
-
 
 MACRO_ALLOC_POOL_ID_IMPL(CPlayer, MAX_CLIENTS)
 
@@ -24,6 +25,9 @@ CPlayer::~CPlayer()
 {
 	delete m_pCharacter;
 	m_pCharacter = 0;
+
+	if(m_pBot)
+		delete m_pBot;
 }
 
 void CPlayer::Reset()
@@ -86,8 +90,11 @@ void CPlayer::Tick()
 #ifdef CONF_DEBUG
 	if(!g_Config.m_DbgDummies || m_ClientID < MAX_CLIENTS-g_Config.m_DbgDummies)
 #endif
-	if(!Server()->ClientIngame(m_ClientID))
+	if(!IsBot() && !Server()->ClientIngame(m_ClientID))
 		return;
+
+	if(IsBot())
+		m_pBot->Tick();
 
 	// do latency stuff
 	{
@@ -128,6 +135,9 @@ void CPlayer::Tick()
 			{
 				delete m_pCharacter;
 				m_pCharacter = 0;
+
+				if(IsBot())
+					m_pBot->OnReset();
 			}
 		}
 		else if(m_Spawning && m_RespawnTick <= Server()->Tick())
@@ -385,6 +395,9 @@ void CPlayer::KillCharacter(int Weapon)
 		m_pCharacter->Die(m_ClientID, Weapon);
 		delete m_pCharacter;
 		m_pCharacter = 0;
+
+		if(IsBot())
+			m_pBot->OnReset();
 	}
 }
 

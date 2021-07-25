@@ -7,51 +7,6 @@
 #include "botengine.h"
 #include "bot.h"
 
-enum DDNET_EXTRA_GAME_TILES
-{
-	TILE_AIR = 0,
-	TILE_SOLID,
-	TILE_DEATH,
-	TILE_NOHOOK,
-	TILE_NOLASER,
-	TILE_THROUGH_CUT,
-	TILE_THROUGH,
-	TILE_JUMP,
-	TILE_FREEZE = 9,
-	TILE_TELEINEVIL,
-	TILE_UNFREEZE,
-	TILE_DFREEZE,
-	TILE_DUNFREEZE,
-	TILE_TELEINWEAPON,
-	TILE_TELEINHOOK,
-	TILE_WALLJUMP = 16,
-	TILE_EHOOK_ENABLE,
-	TILE_EHOOK_DISABLE,
-	TILE_HIT_ENABLE,
-	TILE_HIT_DISABLE,
-	TILE_SOLO_ENABLE,
-	TILE_SOLO_DISABLE,
-	//Switches
-	TILE_SWITCHTIMEDOPEN = 22,
-	TILE_SWITCHTIMEDCLOSE,
-	TILE_SWITCHOPEN,
-	TILE_SWITCHCLOSE,
-	TILE_TELEIN,
-	TILE_TELEOUT,
-	TILE_BOOST,
-	TILE_TELECHECK,
-	TILE_TELECHECKOUT,
-	TILE_TELECHECKIN,
-	TILE_REFILL_JUMPS = 32,
-	TILE_START,
-	TILE_FINISH,
-	TILE_CHECKPOINT_FIRST = 35,
-	TILE_CHECKPOINT_LAST = 59,
-	TILE_STOP = 60,
-	TILE_STOPS,
-	TILE_STOPA,
-};
-
 CGraph::CGraph()
 {
 	m_pClosestPath = 0;
@@ -325,11 +280,12 @@ void CBotEngine::Init(CTile *pTiles, int Width, int Height)
 		// int MarginH = 3;
 		for(int i = 0; i < m_Width; i++)
 		{
-			int Index = m_pTiles[i+j*m_Width].m_Reserved;
+			const CTile &pTile = m_pTiles[i+j*m_Width];
+			int Index = pTile.m_Index;
 
-			if(Index <= TILE_NOHOOK)
+			if(Index <= TILE_PHYSICS_NOHOOK)
 			{
-				m_pGrid[i+j*m_Width] = Index + GTILE_AIR - TILE_AIR;
+				m_pGrid[i+j*m_Width] = Index + GTILE_AIR - TILE_PHYSICS_AIR;
 			}
 #if 0
 			if(Index >= ENTITY_OFFSET + ENTITY_FLAGSTAND_RED && Index < ENTITY_OFFSET + NUM_ENTITIES)
@@ -363,11 +319,11 @@ void CBotEngine::Init(CTile *pTiles, int Width, int Height)
 		{
 			for(int i = 0; i < m_Width; i++)
 			{
-				int Index = m_pTiles[i+j*m_Width].m_Reserved;
+				int Index = m_pTiles[i+j*m_Width].m_Index;
 
-				if(Index <= TILE_NOHOOK)
+				if(Index <= TILE_PHYSICS_NOHOOK)
 				{
-					m_pGrid[i+j*m_Width] = Index + GTILE_AIR - TILE_AIR;
+					m_pGrid[i+j*m_Width] = Index + GTILE_AIR - TILE_PHYSICS_AIR;
 				}
 #if 0
 				else if(Index >= ENTITY_OFFSET + ENTITY_FLAGSTAND_RED && Index < ENTITY_OFFSET + NUM_ENTITIES)

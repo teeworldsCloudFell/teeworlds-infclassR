@@ -183,6 +183,8 @@ public:
 	CVoteOptionServer *m_pVoteOptionFirst;
 	CVoteOptionServer *m_pVoteOptionLast;
 
+	class CBotEngine *m_pBotEngine;
+
 	// helper functions
 	void CreateDamageInd(vec2 Pos, float AngleMod, int Amount);
 	void CreateExplosion(vec2 Pos, int Owner, int Weapon, bool NoDamage, TAKEDAMAGEMODE TakeDamageMode = TAKEDAMAGEMODE_NOINFECTION, float DamageFactor = 1.0f);
@@ -280,6 +282,10 @@ private:
 	bool PrivateMessage(const char* pStr, int ClientID, bool TeamChat);
 	void Converse(int ClientID, const char* pStr, int team);
 	void MutePlayer(const char* pStr, int ClientID);
+
+	void DeleteBot(int i);
+	bool AddBot(int i);
+	void CheckBotNumber();
 
 	void InitGeolocation();
 

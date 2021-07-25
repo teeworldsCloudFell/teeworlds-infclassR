@@ -237,7 +237,7 @@ CBot::CTarget CBot::GetNewTarget()
 							Count++;
 					if(Count)
 					{
-						Count = random_int(0, Count - 1); // KAFFEINE! CHECK THIS!
+						Count = random_int(0, Count - 1) + 1; // KAFFEINE! CHECK THIS!
 						int c = 0;
 						for(; Count; c++)
 							if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && (GameServer()->m_apPlayers[c]->GetTeam() != Team || !GameServer()->m_pController->IsTeamplay()))

@@ -20,6 +20,9 @@
 
 #include <game/server/player.h>
 
+#include <game/server/bot.h>
+#include <game/server/botengine.h>
+
 #ifdef CONF_GEOLOCATION
 #include <infclassr/geolocation.h>
 #endif
@@ -73,7 +76,9 @@ void CGameContext::Construct(int Resetting)
 
 	if(Resetting==NO_RESET)
 		m_pVoteOptionHeap = new CHeap();
-	
+
+	m_pBotEngine = new CBotEngine(this);
+
 	m_FunRound = false;
 	m_FunRoundsPassed = 0;
 }
@@ -101,7 +106,9 @@ CGameContext::~CGameContext()
 		delete m_apPlayers[i];
 	if(!m_Resetting)
 		delete m_pVoteOptionHeap;
-	
+
+	delete m_pBotEngine;
+
 #ifdef CONF_GEOLOCATION
 	if(!m_Resetting)
 	{
@@ -4247,6 +4254,12 @@ void CGameContext::OnInit(/*class IKernel *pKernel*/)
 
 	Console()->ExecuteFile(g_Config.m_SvResetFile);
 
+	// create all entities from the game layer
+	CMapItemLayerTilemap *pTileMap = m_Layers.PhysicsLayer();
+	CTile *pTiles = (CTile *)Kernel()->RequestInterface<IMap>()->GetData(pTileMap->m_Data);
+
+	m_pBotEngine->Init(pTiles, pTileMap->m_Width, pTileMap->m_Height);
+
 	// select gametype
 	m_pController = new CInfClassGameController(this);
 
@@ -4305,6 +4318,8 @@ void CGameContext::OnInit(/*class IKernel *pKernel*/)
 		}
 	}
 #endif
+
+	CheckBotNumber();
 }
 
 void CGameContext::OnStartRound()
@@ -4338,6 +4353,13 @@ void CGameContext::OnSnap(int ClientID)
 	m_World.Snap(ClientID);
 	m_pController->Snap(ClientID);
 	m_Events.Snap(ClientID);
+
+	// Snap bot debug info
+	if(Config()->m_SvBotEngineDrawGraph)
+		m_pBotEngine->Snap(ClientID);
+	for(int i = 0; i < MAX_CLIENTS; i++)
+		if(m_apPlayers[i] && m_apPlayers[i]->IsBot() && Config()->m_SvBotDrawTarget)
+			m_apPlayers[i]->m_pBot->Snap(ClientID);
 
 /* INFECTION MODIFICATION START ***************************************/
 	//Snap laser dots
@@ -4573,5 +4595,70 @@ void CGameContext::Converse(int ClientID, const char* pStr, int team)
 		str_format(aBuf, sizeof(aBuf), "%s %s", Server()->ClientName(pPlayer->m_LastWhisperId), pStr);
 		//dbg_msg("TEST", aBuf);
 		PrivateMessage(aBuf, ClientID, (team != CGameContext::CHAT_ALL));
+	}
+}
+
+void CGameContext::DeleteBot(int i) {
+	if(m_apPlayers[i] && m_apPlayers[i]->IsBot()) {
+		dbg_msg("context","Delete bot at slot: %d", i);
+		OnClientDrop(i, 0, "Everything is awesome");
+	}
+}
+
+bool CGameContext::AddBot(int i) {
+	if(m_apPlayers[i])
+		return false;
+	if(Server()->NewBot(i) == 1)
+		return false;
+	dbg_msg("context","Add a bot at slot: %d", i);
+	m_apPlayers[i] = m_pController->CreatePlayer(i);
+	m_apPlayers[i]->m_pBot = new CBot(m_pBotEngine, m_apPlayers[i]);
+	Server()->SetClientName(i, g_aBotName[i % 16]);
+	Server()->SetClientClan(i, g_BotClan);
+
+	OnClientEnter(i);
+
+	return true;
+}
+
+void CGameContext::CheckBotNumber() {
+	int BotNumber = 0;
+	int PlayerCount = 0;
+	int ClientCount = 0;
+	for (int i = 0 ; i < MAX_CLIENTS ; ++i) {
+		if (!m_apPlayers[i])
+			continue;
+		if (m_apPlayers[i]->IsBot())
+			BotNumber++;
+		else {
+			if (m_apPlayers[i]->GetTeam() != TEAM_SPECTATORS)
+				PlayerCount++;
+			ClientCount++;
+		}
+	}
+	int MaxBotSlots = 10; //minimum(Config()->m_SvBotSlots, Config()->m_SvPlayerSlots - PlayerCount);
+	if(!Config()->m_SvBotAlwaysEnable && !ClientCount)
+		BotNumber += MaxBotSlots;
+	// Remove bot excedent
+	if (BotNumber - MaxBotSlots > 0)	{
+		int FirstBot = 0;
+		for (int i = 0 ; i < BotNumber - MaxBotSlots ; i++) {
+			for (; FirstBot < MAX_CLIENTS ; FirstBot++)
+				if (m_apPlayers[FirstBot] && m_apPlayers[FirstBot]->IsBot())
+					break;
+			if (FirstBot < MAX_CLIENTS)
+				DeleteBot(FirstBot);
+		}
+	}
+	// Add missing bot if possible
+	if (MaxBotSlots - BotNumber > 0) {
+		int LastFreeSlot = Config()->m_SvMaxClients-1;
+		for (int i = 0 ; i < MaxBotSlots - BotNumber ; i++) {
+			for (; LastFreeSlot >= 0 ; LastFreeSlot--)
+				if(!m_apPlayers[LastFreeSlot])
+					break;
+			if (LastFreeSlot >= 0)
+				AddBot(LastFreeSlot);
+		}
 	}
 }
