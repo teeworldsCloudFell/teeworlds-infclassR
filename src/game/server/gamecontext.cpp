@@ -4636,7 +4636,7 @@ void CGameContext::CheckBotNumber() {
 			ClientCount++;
 		}
 	}
-	int MaxBotSlots = 10; //minimum(Config()->m_SvBotSlots, Config()->m_SvPlayerSlots - PlayerCount);
+	int MaxBotSlots = Config()->m_SvBotSlots; //minimum(Config()->m_SvBotSlots, Config()->m_SvPlayerSlots - PlayerCount);
 	if(!Config()->m_SvBotAlwaysEnable && !ClientCount)
 		BotNumber += MaxBotSlots;
 	// Remove bot excedent
