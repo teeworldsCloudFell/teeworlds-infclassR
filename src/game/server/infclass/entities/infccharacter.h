@@ -104,6 +104,7 @@ public:
 	void UnlockPosition();
 
 	void ResetMovementsInput();
+	int GetAmmoCount(int Weapon) const override;
 
 protected:
 	void PreCoreTick() override;

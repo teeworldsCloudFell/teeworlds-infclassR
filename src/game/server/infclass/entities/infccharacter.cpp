@@ -368,6 +368,74 @@ void CInfClassCharacter::ResetMovementsInput()
 	m_Input.m_Hook = 0;
 }
 
+int CInfClassCharacter::GetAmmoCount(int Weapon) const
+{
+	if(Weapon == WEAPON_HAMMER)
+	{
+		switch(GetPlayerClass())
+		{
+			case PLAYERCLASS_MERCENARY:
+				return 0;
+			case PLAYERCLASS_MEDIC:
+				return -1;
+			case PLAYERCLASS_HERO:
+				return 0;
+			case PLAYERCLASS_ENGINEER:
+				return -1;
+			case PLAYERCLASS_SOLDIER:
+				return 0;
+			case PLAYERCLASS_NINJA:
+				return -1;
+			case PLAYERCLASS_SNIPER:
+				return 0;
+			case PLAYERCLASS_SCIENTIST:
+				return 0;
+			case PLAYERCLASS_BIOLOGIST:
+				return -1;
+			case PLAYERCLASS_LOOPER:
+				return 0;
+		}
+	}
+
+	INFWEAPON InfWeapon = static_cast<INFWEAPON>(GetInfWeaponID(Weapon));
+
+	switch(InfWeapon)
+	{
+		case INFWEAPON_HAMMER:
+		case INFWEAPON_GUN:
+		case INFWEAPON_SHOTGUN:
+		case INFWEAPON_GRENADE:
+		case INFWEAPON_LASER:
+		case INFWEAPON_NINJA:
+		case INFWEAPON_ENGINEER_LASER:
+		case INFWEAPON_SNIPER_LASER:
+		case INFWEAPON_SOLDIER_GRENADE:
+		case INFWEAPON_SCIENTIST_LASER:
+		case INFWEAPON_MEDIC_SHOTGUN:
+		case INFWEAPON_HERO_GRENADE:
+		case INFWEAPON_HERO_LASER:
+		case INFWEAPON_HERO_SHOTGUN:
+		case INFWEAPON_BIOLOGIST_SHOTGUN:
+		case INFWEAPON_LOOPER_LASER:
+		case INFWEAPON_LOOPER_GRENADE:
+		case INFWEAPON_NINJA_HAMMER:
+		case INFWEAPON_NINJA_GRENADE:
+		case INFWEAPON_MERCENARY_GUN:
+		case INFWEAPON_MERCENARY_GRENADE:
+			return CCharacter::GetAmmoCount(Weapon);
+		case INFWEAPON_BIOLOGIST_LASER:
+		case INFWEAPON_SCIENTIST_GRENADE:
+		case INFWEAPON_MEDIC_GRENADE:
+		case INFWEAPON_MEDIC_LASER:
+		case INFWEAPON_MERCENARY_LASER:
+		case INFWEAPON_WITCH_PORTAL_LASER:
+		case NB_INFWEAPON:
+		case INFWEAPON_NONE:
+			return 0;
+	}
+	return 0;
+}
+
 void CInfClassCharacter::OnHammerFired(WeaponFireContext *pFireContext)
 {
 	vec2 Direction = GetDirection();
