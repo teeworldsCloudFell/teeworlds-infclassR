@@ -550,7 +550,7 @@ void CBot::HandleWeapon(bool SeeTarget)
 		float ClosestRange = distance(Pos, apTarget[c]->m_Pos);
 		float Close = 65.0f;
 		Target = apTarget[c]->m_Pos - Pos;
-		if(ClosestRange < Close)
+		if((ClosestRange < Close) && (pMe->GetAmmoCount(WEAPON_HAMMER) != 0))
 		{
 			Weapon = WEAPON_HAMMER;
 		}
