@@ -231,16 +231,17 @@ CBot::CTarget CBot::GetNewTarget()
 			case CTarget::TARGET_PLAYER:
 				{
 					int Team = m_pPlayer->GetTeam();
+					bool ZTeam = m_pPlayer->IsActuallyZombie();
 					int Count = 0;
 					for(int c = 0; c < MAX_CLIENTS; c++)
-						if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && (GameServer()->m_apPlayers[c]->GetTeam() != Team || !GameServer()->m_pController->IsTeamplay()))
+						if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && ((GameServer()->m_apPlayers[c]->IsActuallyZombie() != ZTeam) || !GameServer()->m_pController->IsTeamplay()))
 							Count++;
 					if(Count)
 					{
-						Count = random_int(0, Count - 1) + 1; // KAFFEINE! CHECK THIS!
+						Count = random_int(0, Count - 1) + 1;
 						int c = 0;
 						for(; Count; c++)
-							if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && (GameServer()->m_apPlayers[c]->GetTeam() != Team || !GameServer()->m_pController->IsTeamplay()))
+							if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && ((GameServer()->m_apPlayers[c]->IsActuallyZombie() != ZTeam) || !GameServer()->m_pController->IsTeamplay()))
 								Count--;
 						c--;
 						Target.m_Pos = GameServer()->m_apPlayers[c]->GetCharacter()->GetPos();

@@ -563,6 +563,7 @@ void IGameController::Tick()
 
 bool IGameController::IsTeamplay() const
 {
+	return true;
 	return m_GameFlags&GAMEFLAG_TEAMS;
 }
 
