@@ -7,6 +7,10 @@
 #include "player.h"
 #include "entities/character.h"
 
+#include <base/tl/array_on_stack.h>
+
+#include "infclass/infcgamecontroller.h"
+
 CBot::CBot(CBotEngine *pBotEngine, CPlayer *pPlayer)
 {
 	m_pBotEngine = pBotEngine;
@@ -34,6 +38,64 @@ void CBot::OnReset()
 	m_Flags = 0;
 	m_pPath->m_Size = 0;
 	m_ComputeTarget.m_Type = CTarget::TARGET_EMPTY;
+}
+
+bool CBot::IsValidEnemy(int ClientID) const
+{
+	if(ClientID == m_pPlayer->GetCID())
+		return false;
+
+	CPlayer *pTarget = m_pBotEngine->GameServer()->m_apPlayers[ClientID];
+	if(!pTarget)
+		return false;
+	if(!pTarget->GetCharacter() || !pTarget->GetCharacter()->IsAlive())
+		return false;
+
+	if(m_pPlayer->IsActuallyZombie())
+	{
+		return pTarget->IsHuman();
+	}
+	else
+	{
+		return pTarget->IsActuallyZombie();
+	}
+}
+
+int CBot::GetBestTarget(float Radius) const
+{
+	ClientsArray Enemies;
+	ClientsArray InvalidTargets;
+	int Count = 0;
+	for(int c = 0; c < MAX_CLIENTS; c++)
+	{
+		if(IsValidEnemy(c))
+		{
+			Enemies.Add(c);
+		}
+		else
+		{
+			InvalidTargets.Add(c);
+		}
+	}
+
+	if(Enemies.IsEmpty())
+		return -1;
+
+	CInfClassGameController *pController = static_cast<CInfClassGameController *>(m_pBotEngine->GameServer()->m_pController);
+	ClientsArray TargetsNearby;
+	pController->GetSortedTargetsInRange(m_pPlayer->GetCharacter()->GetPos(), Radius, InvalidTargets, &TargetsNearby);
+
+	if(TargetsNearby.IsEmpty())
+	{
+		if(Radius < 0)
+		{
+			return Enemies.First();
+		}
+
+		return -1;
+	}
+
+	return TargetsNearby.First();
 }
 
 void CBot::UpdateTargetOrder()
@@ -86,8 +148,19 @@ CBot::CTarget CBot::GetNewTarget()
 	Target.m_NeedUpdate = Target.m_Type == CTarget::TARGET_EMPTY;
 
 	// Player target character doesn't exist
-	if(Target.m_Type == CTarget::TARGET_PLAYER && !(GameServer()->m_apPlayers[Target.m_PlayerCID] && GameServer()->m_apPlayers[Target.m_PlayerCID]->GetCharacter()))
-		Target.m_NeedUpdate = true;
+	int NewBestTarget = GetBestTarget(600);
+
+	if(Target.m_Type == CTarget::TARGET_PLAYER)
+	{
+		if(!IsValidEnemy(Target.m_PlayerCID))
+		{
+			Target.m_NeedUpdate = true;
+		}
+		if((NewBestTarget >= 0) && (NewBestTarget != Target.m_PlayerCID))
+		{
+			Target.m_NeedUpdate = true;
+		}
+	}
 
 	// Give up on actual target after 30s
 	if(Target.m_StartTick + GameServer()->Server()->TickSpeed()*30 < GameServer()->Server()->Tick())
@@ -230,23 +303,12 @@ CBot::CTarget CBot::GetNewTarget()
 #endif
 			case CTarget::TARGET_PLAYER:
 				{
-					int Team = m_pPlayer->GetTeam();
-					bool ZTeam = m_pPlayer->IsActuallyZombie();
-					int Count = 0;
-					for(int c = 0; c < MAX_CLIENTS; c++)
-						if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && ((GameServer()->m_apPlayers[c]->IsActuallyZombie() != ZTeam) || !GameServer()->m_pController->IsTeamplay()))
-							Count++;
-					if(Count)
+					int TargetCID = GetBestTarget(-1);
+					if(TargetCID >= 0)
 					{
-						Count = random_int(0, Count - 1) + 1;
-						int c = 0;
-						for(; Count; c++)
-							if(c != m_pPlayer->GetCID() && GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && ((GameServer()->m_apPlayers[c]->IsActuallyZombie() != ZTeam) || !GameServer()->m_pController->IsTeamplay()))
-								Count--;
-						c--;
-						Target.m_Pos = GameServer()->m_apPlayers[c]->GetCharacter()->GetPos();
+						Target.m_Pos = GameServer()->m_apPlayers[TargetCID]->GetCharacter()->GetPos();
 						Target.m_Type = CTarget::TARGET_PLAYER;
-						Target.m_PlayerCID = c;
+						Target.m_PlayerCID = TargetCID;
 						return Target;
 					}
 				}
@@ -540,7 +602,7 @@ void CBot::HandleWeapon(bool SeeTarget)
 			apTarget[Count++] = apTarget[0];
 			apTarget[0] =	GameServer()->m_apPlayers[c]->GetCharacter()->GetCore();
 		}
-		else if(GameServer()->m_apPlayers[c] && GameServer()->m_apPlayers[c]->GetCharacter() && (GameServer()->m_apPlayers[c]->GetTeam() != Team || !GameServer()->m_pController->IsTeamplay()))
+		else if(IsValidEnemy(c))
 			apTarget[Count++] = GameServer()->m_apPlayers[c]->GetCharacter()->GetCore();
 	}
 	int Weapon = -1;
@@ -778,8 +840,10 @@ void CBot::MakeChoice(bool UseTarget)
 				Flags |= BFLAG_JUMP;
 		}
 	}
+#if 0
 	if(Flags & BFLAG_JUMP || pMe->m_Vel.y < 0)
 		m_InputData.m_WantedWeapon = WEAPON_GRENADE +1;
+#endif
 	if(m_Target.y < -400 && pMe->m_Vel.y < 0 && absolute(m_Target.x) < 30 && Collision()->CheckPoint(pMe->m_Pos+vec2(0,50)))
 	{
 		Flags &= ~BFLAG_HOOK;

@@ -63,6 +63,9 @@ protected:
 	class CCollision *Collision() { return GameServer()->Collision(); }
 	class CTuningParams *Tuning() { return GameServer()->Tuning(); }
 
+	bool IsValidEnemy(int ClientID) const;
+	int GetBestTarget(float Radius) const;
+
 	CBotEngine::CPath *m_pPath;
 
 	int m_SnapID;
