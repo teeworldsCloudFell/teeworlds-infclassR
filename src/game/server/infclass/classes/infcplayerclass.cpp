@@ -124,7 +124,20 @@ void CInfClassPlayerClass::SetCharacter(CInfClassCharacter *character)
 
 	if(m_pCharacter)
 	{
+		if(m_CursorID < 0)
+		{
+			m_CursorID = Server()->SnapNewID();
+		}
+
 		GiveClassAttributes();
+	}
+	else
+	{
+		if(m_CursorID >= 0)
+		{
+			Server()->SnapFreeID(m_CursorID);
+			m_CursorID = -1;
+		}
 	}
 }
 

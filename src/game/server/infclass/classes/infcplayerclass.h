@@ -84,6 +84,8 @@ protected:
 	int m_Poison = 0;
 	int m_PoisonTick = 0;
 	int m_PoisonFrom = 0;
+
+	int m_CursorID = -1;
 };
 
 #endif // GAME_SERVER_INFCLASS_CLASSES_PLAYER_CLASS_H
