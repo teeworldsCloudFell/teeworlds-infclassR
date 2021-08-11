@@ -322,6 +322,7 @@ void CServer::CClient::Reset(bool ResetScore)
 	m_LastAckedSnapshot = -1;
 	m_LastInputTick = -1;
 	m_Quitting = false;
+	m_IsBot = false;
 	m_SnapRate = CClient::SNAPRATE_INIT;
 	m_NextMapChunk = 0;
 	
@@ -979,6 +980,31 @@ int CServer::ClientRejoinCallback(int ClientID, void *pUser)
 
 	pThis->SendMap(ClientID);
 
+	return 0;
+}
+
+int CServer::NewBot(int ClientID)
+{
+	if(m_aClients[ClientID].m_State > CClient::STATE_EMPTY && !m_aClients[ClientID].m_IsBot)
+		return 1;
+	m_aClients[ClientID].m_State = CClient::STATE_INGAME;
+	m_aClients[ClientID].m_IsBot = true;
+	return 0;
+}
+
+int CServer::DelBot(int ClientID)
+{
+	if( !m_aClients[ClientID].m_IsBot )
+		return 1;
+	m_aClients[ClientID].m_State = CClient::STATE_EMPTY;
+	m_aClients[ClientID].m_aName[0] = 0;
+	m_aClients[ClientID].m_aClan[0] = 0;
+	m_aClients[ClientID].m_Country = -1;
+	m_aClients[ClientID].m_Authed = AUTHED_NO;
+	m_aClients[ClientID].m_AuthTries = 0;
+	m_aClients[ClientID].m_pRconCmdToSend = 0;
+	m_aClients[ClientID].m_IsBot = false;
+	m_aClients[ClientID].m_Snapshots.PurgeAll();
 	return 0;
 }
 
