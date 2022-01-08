@@ -118,6 +118,8 @@ public:
 	*/
 	virtual bool OnEntity(const char* pName, vec2 Pivot, vec2 P0, vec2 P1, vec2 P2, vec2 P3, int PosEnv);
 
+	virtual void HandleCharacterTiles(class CCharacter *pChr);
+
 	/*
 		Function: on_CCharacter_spawn
 			Called when a CCharacter spawns into the game world.
@@ -144,9 +146,13 @@ public:
 
 	//
 /* INFECTION MODIFICATION START ***************************************/
+	virtual bool PreSpawn(CPlayer* pPlayer, vec2 *pPos) = 0;
 	virtual int ChooseInfectedClass(const CPlayer* pPlayer) const = 0;
 	virtual bool IsSpawnable(vec2 Position, int TeleZoneIndex) = 0;
 	virtual void OnClientDrop(int ClientID, int Type) {};
+	virtual void OnPlayerInfected(CPlayer* pPlayer, CPlayer* pInfectiousPlayer) = 0;
+	virtual bool IsInfectionStarted() = 0;
+	virtual bool PortalsAvailableForCharacter(class CCharacter *pCharacter) = 0;
 	
 	void MaybeSendStatistics();
 	int GetRoundId() { return m_RoundId; }

@@ -5,7 +5,6 @@
 
 class CGameContext;
 class CInfClassGameController;
-class CInfClassPlayer;
 class CInfClassPlayerClass;
 class CWhiteHole;
 
@@ -29,18 +28,6 @@ struct WeaponRegenParams
 	int RegenInterval = 0;
 };
 
-struct SpawnContext
-{
-	enum SPAWN_TYPE
-	{
-		MapSpawn,
-		WitchSpawn,
-	};
-
-	vec2 SpawnPos = vec2(0, 0);
-	SPAWN_TYPE SpawnType = MapSpawn;
-};
-
 class CInfClassCharacter : public CCharacter
 {
 	MACRO_ALLOC_POOL_ID()
@@ -48,10 +35,10 @@ public:
 	CInfClassCharacter(CInfClassGameController *pGameController);
 	~CInfClassCharacter() override;
 
-	static const CInfClassCharacter *GetInstance(const CCharacter *pCharacter);
-	static CInfClassCharacter *GetInstance(CCharacter *pCharacter);
+	static const CInfClassCharacter *fromCharacter(const CCharacter *pCharacter);
+	static CInfClassCharacter *fromCharacter(CCharacter *pCharacter);
 
-	void OnCharacterSpawned(const SpawnContext &Context);
+	void OnCharacterSpawned();
 	void OnCharacterInInfectionZone();
 	void OnCharacterOutOfInfectionZone();
 	void OnCharacterInBonusZoneTick();
@@ -62,11 +49,7 @@ public:
 	void Snap(int SnappingClient) override;
 	void SpecialSnapForClient(int SnappingClient, bool *pDoSnap);
 
-	void HandleWeaponSwitch() override;
-
 	void FireWeapon() override;
-
-	bool TakeDamage(vec2 Force, int Dmg, int From, int Weapon, TAKEDAMAGEMODE Mode) override;
 
 	void OnWeaponFired(WeaponFireContext *pFireContext);
 
@@ -85,7 +68,6 @@ public:
 	void HandleMapMenu();
 	void HandleWeaponsRegen();
 	void HandleHookDraining();
-	void HandleIndirectKillerCleanup();
 
 	void Die(int Killer, int Weapon) override;
 
@@ -93,11 +75,7 @@ public:
 	void SetLastWeapon(int Weapon);
 	void TakeAllWeapons();
 
-	void AddAmmo(int Weapon, int Ammo);
-
 	int GetCID() const;
-
-	CInfClassPlayer *GetPlayer();
 
 	const CInfClassPlayerClass *GetClass() const { return m_pClass; }
 	CInfClassPlayerClass *GetClass() { return m_pClass; }
@@ -129,22 +107,22 @@ public:
 	bool IsInvisible() const;
 	bool IsInvincible() const; // Invincible here means "ignores all damage"
 	bool HasHallucination() const;
-	void TryUnfreeze() override;
-	FREEZEREASON GetFreezeReason() const { return m_FreezeReason; }
 
 	float WebHookLength() const;
 
 	void CheckSuperWeaponAccess();
+	void MaybeGiveStunGrenades();
 	void FireSoldierBomb();
 	void PlacePortal(WeaponFireContext *pFireContext);
+	CPortal *FindPortalInTarget();
+	void OnPortalDestroy(CPortal *pPortal);
+	bool ProcessCharacterOnPortal(CPortal *pPortal, CCharacter *pCharacter);
+	bool CanOpenPortals() const;
 
 	void GiveGift(int GiftType);
 	void GiveRandomClassSelectionBonus();
-	void GiveLonelyZombieBonus();
 	void MakeVisible();
-	void GrantSpawnProtection();
 
-	bool PositionIsLocked() const;
 	void LockPosition();
 	void UnlockPosition();
 
@@ -152,45 +130,29 @@ public:
 
 	void GiveNinjaBuf();
 
+	bool hasPortalIn() const { return m_pPortalIn; }
+	bool hasPortalOut() const { return m_pPortalOut; }
+
 	CHeroFlag *GetHeroFlag() { return m_pHeroFlag; }
 	int GetFlagCoolDown();
-
-	bool GetIndirectKiller(int *pKillerId, int *pWeaponId);
-
-	int GetLastHooker() const { return m_LastHooker; }
-	void UpdateLastHooker(int ClientID, int HookerTick);
-
-	void UpdateLastEnforcer(int ClientID, float Force, int Weapon, int Tick);
-
-	void SaturateVelocity(vec2 Force, float MaxSpeed);
-	bool HasPassenger() const;
-	CCharacter *GetPassenger();
-	int GetInfZoneTick();
 
 protected:
 	void PreCoreTick() override;
 	void PostCoreTick() override;
 
-	void ClassSpawnAttributes();
 	void UpdateTuningParam();
-
-	void ResetClassObject();
 
 protected:
 	CInfClassGameController *m_pGameController = nullptr;
 	CInfClassPlayerClass *m_pClass = nullptr;
-
-	int m_DamageTaken = 0;
-	bool m_NeedFullHeal = false;
-	bool m_PositionLocked = false;
 };
 
-inline const CInfClassCharacter *CInfClassCharacter::GetInstance(const CCharacter *pCharacter)
+inline const CInfClassCharacter *CInfClassCharacter::fromCharacter(const CCharacter *pCharacter)
 {
 	return static_cast<const CInfClassCharacter *>(pCharacter);
 }
 
-inline CInfClassCharacter *CInfClassCharacter::GetInstance(CCharacter *pCharacter)
+inline CInfClassCharacter *CInfClassCharacter::fromCharacter(CCharacter *pCharacter)
 {
 	return static_cast<CInfClassCharacter *>(pCharacter);
 }

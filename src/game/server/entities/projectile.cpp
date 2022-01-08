@@ -5,17 +5,19 @@
 #include <game/generated/protocol.h>
 #include <game/server/gamecontext.h>
 #include <game/server/infclass/entities/growingexplosion.h>
-#include <game/server/infclass/infcgamecontroller.h>
+#include <game/server/infclass/entities/portal.h>
 
 #include "projectile.h"
 
-CProjectile::CProjectile(CGameContext *pGameContext, int Type, int Owner, vec2 Pos, vec2 Dir, int Span,
+CProjectile::CProjectile(CGameWorld *pGameWorld, int Type, int Owner, vec2 Pos, vec2 Dir, int Span,
 		int Damage, bool Explosive, float Force, int SoundImpact, int Weapon, TAKEDAMAGEMODE TakeDamageMode)
-: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_PROJECTILE, Pos, Owner)
+: CEntity(pGameWorld, CGameWorld::ENTTYPE_PROJECTILE)
 {
 	m_Type = Type;
+	m_Pos = Pos;
 	m_Direction = Dir;
 	m_LifeSpan = Span;
+	m_Owner = Owner;
 	m_Force = Force;
 	m_Damage = Damage;
 	m_SoundImpact = SoundImpact;
@@ -30,6 +32,16 @@ CProjectile::CProjectile(CGameContext *pGameContext, int Type, int Owner, vec2 P
 	m_StartPos = Pos;
 	m_TakeDamageMode = TakeDamageMode;
 /* INFECTION MODIFICATION END *****************************************/
+}
+
+void CProjectile::Reset()
+{
+	GameServer()->m_World.DestroyEntity(this);
+}
+
+int CProjectile::GetOwner() const
+{
+	return m_Owner;
 }
 
 vec2 CProjectile::GetPos(float Time)
@@ -69,11 +81,24 @@ void CProjectile::Tick()
 	const float ProjectileRadius = 6.0f;
 	CCharacter *OwnerChar = GameServer()->GetPlayerChar(m_Owner);
 	CCharacter *TargetChr = GameServer()->m_World.IntersectCharacter(PrevPos, CurPos, ProjectileRadius, CurPos, OwnerChar);
+	vec2 WitchPortalAt;
+	CEntity *TargetWitchPortal = GameServer()->m_World.IntersectEntity(PrevPos, CurPos, ProjectileRadius, &WitchPortalAt, CGameWorld::ENTTYPE_PORTAL);
+	if (TargetChr && TargetWitchPortal)
+	{
+		if (distance(PrevPos, TargetWitchPortal->m_Pos) < distance(PrevPos, TargetChr->m_Pos))
+		{
+			TargetChr = nullptr;
+		}
+		else
+		{
+			TargetWitchPortal = nullptr;
+		}
+	}
 
 	m_LifeSpan--;
 	
 /* INFECTION MODIFICATION START ***************************************/
-	if(TargetChr || Collide || m_LifeSpan < 0 || GameLayerClipped(CurPos))
+	if(TargetWitchPortal || TargetChr || Collide || m_LifeSpan < 0 || GameLayerClipped(CurPos))
 	{
 		if(m_LifeSpan >= 0 || (m_Weapon == WEAPON_GRENADE))
 			GameServer()->CreateSound(CurPos, m_SoundImpact);
@@ -87,7 +112,7 @@ void CProjectile::Tick()
 		}
 		else if(m_Explosive)
 		{
-			GameController()->CreateExplosion(CurPos, m_Owner, m_Weapon, m_TakeDamageMode);
+			GameServer()->CreateExplosion(CurPos, m_Owner, m_Weapon, false, m_TakeDamageMode);
 		}
 		else if(TargetChr)
 		{
@@ -102,6 +127,11 @@ void CProjectile::Tick()
 					TargetChr->TakeDamage(m_Direction * maximum(0.001f, m_Force), m_Damage, m_Owner, m_Weapon, m_TakeDamageMode);
 				}
 			}
+		}
+		else if (TargetWitchPortal)
+		{
+			CPortal *Portal = static_cast<CPortal*>(TargetWitchPortal);
+			Portal->TakeDamage(m_Damage, m_Owner, m_Weapon, m_TakeDamageMode);
 		}
 
 		GameServer()->m_World.DestroyEntity(this);

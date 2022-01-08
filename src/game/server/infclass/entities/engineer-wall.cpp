@@ -5,7 +5,6 @@
 #include <game/generated/protocol.h>
 #include <game/server/gamecontext.h>
 #include <game/server/infclass/classes/infcplayerclass.h>
-#include <game/server/infclass/classes/infected/infected.h>
 #include <engine/server/roundstatistics.h>
 #include <engine/shared/config.h>
 
@@ -16,7 +15,7 @@ const float g_BarrierMaxLength = 300.0;
 const float g_BarrierRadius = 0.0;
 
 CEngineerWall::CEngineerWall(CGameContext *pGameContext, vec2 Pos1, vec2 Pos2, int Owner)
-	: CPlacedObject(pGameContext, CGameWorld::ENTTYPE_ENGINEER_WALL, Pos1, Owner)
+	: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_ENGINEER_WALL, Pos1, Owner)
 {
 	if(distance(Pos1, Pos2) > g_BarrierMaxLength)
 	{
@@ -74,7 +73,7 @@ void CEngineerWall::TickPaused()
 
 void CEngineerWall::Snap(int SnappingClient)
 {
-	if(!DoSnapForClient(SnappingClient))
+	if(NetworkClipped(SnappingClient))
 		return;
 
 	// Laser dieing animation
@@ -135,43 +134,40 @@ void CEngineerWall::Snap(int SnappingClient)
 
 void CEngineerWall::OnZombieHit(CInfClassCharacter *pZombie)
 {
-	if(!pZombie->CanDie())
+	if(pZombie->GetPlayer())
 	{
-		return;
-	}
-
-	CInfClassInfected *pInfected = CInfClassInfected::GetInstance(pZombie);
-
-	if(pZombie->GetPlayer() && pInfected)
-	{
-		pInfected->OnLaserWall();
-
-		for(CInfClassCharacter *pHook = (CInfClassCharacter*) GameWorld()->FindFirst(CGameWorld::ENTTYPE_CHARACTER); pHook; pHook = (CInfClassCharacter *)pHook->TypeNext())
+		if(pZombie->CanDie())
 		{
-			if(
-				pHook->GetPlayer() &&
-				pHook->IsHuman() &&
-				pHook->GetHookedPlayer() == pZombie->GetCID() &&
-				pHook->GetCID() != m_Owner && //The engineer will get the point when the infected dies
-				pZombie->m_LastFreezer != pHook->GetCID() //The ninja will get the point when the infected dies
-			)
+			for(CInfClassCharacter *pHook = (CInfClassCharacter*) GameWorld()->FindFirst(CGameWorld::ENTTYPE_CHARACTER); pHook; pHook = (CInfClassCharacter *)pHook->TypeNext())
 			{
-				int ClientID = pHook->GetCID();
-				Server()->RoundStatistics()->OnScoreEvent(ClientID, SCOREEVENT_HELP_HOOK_BARRIER, pHook->GetPlayerClass(), Server()->ClientName(ClientID), GameServer()->Console());
-				GameServer()->SendScoreSound(pHook->GetCID());
+				if(
+					pHook->GetPlayer() &&
+					pHook->IsHuman() &&
+					pHook->m_Core.m_HookedPlayer == pZombie->GetCID() &&
+					pHook->GetCID() != m_Owner && //The engineer will get the point when the infected dies
+					pZombie->m_LastFreezer != pHook->GetCID() //The ninja will get the point when the infected dies
+				)
+				{
+					int ClientID = pHook->GetCID();
+					Server()->RoundStatistics()->OnScoreEvent(ClientID, SCOREEVENT_HELP_HOOK_BARRIER, pHook->GetPlayerClass(), Server()->ClientName(ClientID), GameServer()->Console());
+					GameServer()->SendScoreSound(pHook->GetCID());
+				}
 			}
 		}
 
-		int LifeSpanReducer = ((Server()->TickSpeed()*Config()->m_InfBarrierTimeReduce)/100);
-		m_WallFlashTicks = 10;
-
-		if(pZombie->GetPlayerClass() == PLAYERCLASS_GHOUL)
+		if(pZombie->GetPlayerClass() != PLAYERCLASS_UNDEAD && pZombie->GetPlayerClass() != PLAYERCLASS_VOODOO)
 		{
-			float Factor = pInfected->GetGhoulPercent();
-			LifeSpanReducer += Server()->TickSpeed() * 5.0f * Factor;
-		}
+			int LifeSpanReducer = ((Server()->TickSpeed()*Config()->m_InfBarrierTimeReduce)/100);
+			m_WallFlashTicks = 10;
 
-		m_LifeSpan -= LifeSpanReducer;
+			if(pZombie->GetPlayerClass() == PLAYERCLASS_GHOUL)
+			{
+				float Factor = pZombie->GetClass()->GetGhoulPercent();
+				LifeSpanReducer += Server()->TickSpeed() * 5.0f * Factor;
+			}
+
+			m_LifeSpan -= LifeSpanReducer;
+		}
 	}
 
 	pZombie->Die(m_Owner, WEAPON_HAMMER);

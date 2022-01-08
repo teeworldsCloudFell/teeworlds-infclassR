@@ -13,7 +13,7 @@
 #include "plasma.h"
 
 CTurret::CTurret(CGameContext *pGameContext, vec2 Pos, int Owner, vec2 Direction, CTurret::Type Type)
-	: CPlacedObject(pGameContext, CGameWorld::ENTTYPE_TURRET, Pos, Owner)
+	: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_TURRET, Pos, Owner)
 {
 	m_Dir = Direction;
 	m_StartTick = Server()->Tick();
@@ -62,7 +62,7 @@ void CTurret::Tick()
 		// selfdestruction
 		if(Len < pChr->GetProximityRadius() + 4.0f )
 		{
-			pChr->TakeDamage(vec2(0.f, 0.f), Config()->m_InfTurretSelfDestructDmg, m_Owner, WEAPON_LASER, TAKEDAMAGEMODE::NOINFECTION);
+			pChr->TakeDamage(vec2(0.f, 0.f), Config()->m_InfTurretSelfDestructDmg, m_Owner, WEAPON_LASER, TAKEDAMAGEMODE_NOINFECTION);
 			GameServer()->CreateSound(m_Pos, SOUND_LASER_FIRE);
 			int ClientID = pChr->GetCID();
 			char aBuf[64];
@@ -71,7 +71,7 @@ void CTurret::Tick()
 			GameServer()->SendChatTarget(m_Owner, "A zombie has destroyed your turret!");
 
 			//increase score
-			Server()->RoundStatistics()->OnScoreEvent(ClientID, SCOREEVENT_DESTROY_TURRET, pChr->GetPlayerClass(), Server()->ClientName(ClientID), GameServer()->Console());
+			Server()->RoundStatistics()->OnScoreEvent(ClientID, SCOREEVENT_DESTROY_PORTAL, pChr->GetPlayerClass(), Server()->ClientName(ClientID), GameServer()->Console());
 			GameServer()->SendScoreSound(pChr->GetCID());
 			Reset();
 		}
@@ -180,9 +180,6 @@ void CTurret::Reload()
 
 void CTurret::Snap(int SnappingClient)
 {
-	if(!DoSnapForClient(SnappingClient))
-		return;
-
 	// Draw AntiPing  effect
 	if(Server()->GetClientAntiPing(SnappingClient))
 	{

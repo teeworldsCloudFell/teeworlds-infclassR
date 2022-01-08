@@ -2,7 +2,6 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.				*/
 #include "infcgamecontroller.h"
 
-#include <game/server/gamecontext.h>
 #include <game/server/infclass/classes/infcplayerclass.h>
 #include <game/server/infclass/entities/flyingpoint.h>
 #include <game/server/infclass/entities/infccharacter.h>
@@ -31,10 +30,7 @@ CInfClassGameController::CInfClassGameController(class CGameContext *pGameServer
 	m_MapWidth = GameServer()->Collision()->GetWidth();
 	m_MapHeight = GameServer()->Collision()->GetHeight();
 	m_GrowingMap = new int[m_MapWidth*m_MapHeight];
-
-	m_TargetToKill = -1;
-	m_TargetToKillCoolDown = 0;
-
+	
 	m_InfectedStarted = false;
 	
 	for(int j=0; j<m_MapHeight; j++)
@@ -79,13 +75,12 @@ void CInfClassGameController::OnClientDrop(int ClientID, int Type)
 	if(Type == CLIENTDROPTYPE_SHUTDOWN) return;	
 	
 	CPlayer* pPlayer = GameServer()->m_apPlayers[ClientID];
-	if(pPlayer && pPlayer->IsActuallyZombie() && m_InfectedStarted)
+	if(pPlayer && pPlayer->IsZombie() && m_InfectedStarted)
 	{
 		int NumHumans;
 		int NumInfected;
-		GetPlayerCounter(ClientID, NumHumans, NumInfected);
-		const int NumPlayers = NumHumans + NumInfected;
-		const int NumFirstInfected = GetMinimumInfectedForPlayers(NumPlayers);
+		int NumFirstInfected;
+		GetPlayerCounter(ClientID, NumHumans, NumInfected, NumFirstInfected);
 		
 		if(NumInfected < NumFirstInfected)
 		{
@@ -94,14 +89,10 @@ void CInfClassGameController::OnClientDrop(int ClientID, int Type)
     }
 }
 
-void CInfClassGameController::OnPlayerInfected(CInfClassPlayer *pPlayer, CInfClassPlayer *pInfectiousPlayer, int PreviousClass)
+void CInfClassGameController::OnPlayerInfected(CPlayer *pPlayer, CPlayer *pInfectiousPlayer)
 {
-	int c = ChooseInfectedClass(pPlayer);
-	pPlayer->SetClass(c);
-
-	if(!pInfectiousPlayer)
-	{
-		if(pPlayer->GetCharacter())
+	if (!pInfectiousPlayer || pInfectiousPlayer->GetTeam() == TEAM_SPECTATORS || pPlayer->GetCID() == pInfectiousPlayer->GetCID()) {
+		if (pPlayer->GetCharacter())
 		{
 			// Still send a kill message to notify other players about the infection
 			GameServer()->SendKillMessage(pPlayer->GetCID(), pPlayer->GetCID(), WEAPON_WORLD, 0);
@@ -112,45 +103,16 @@ void CInfClassGameController::OnPlayerInfected(CInfClassPlayer *pPlayer, CInfCla
 	}
 
 	const int InfectedByCID = pInfectiousPlayer->GetCID();
-	if(!IsZombieClass(PreviousClass) && (pPlayer != pInfectiousPlayer))
-	{
-		if(pInfectiousPlayer->IsHuman())
-		{
-			GameServer()->SendChatTarget_Localization(InfectedByCID, CHATCATEGORY_SCORE,
-				_("You have infected {str:VictimName}, shame on you!"),
-				"VictimName", Server()->ClientName(pPlayer->GetCID()),
-				nullptr);
-			GameServer()->SendEmoticon(pInfectiousPlayer->GetCID(), EMOTICON_SORRY);
-			CInfClassCharacter *pGuiltyCharacter = pInfectiousPlayer->GetCharacter();
-			if(pGuiltyCharacter)
-			{
-				const float GuiltyPlayerFreeze = 3;
-				pGuiltyCharacter->Freeze(GuiltyPlayerFreeze, -1, FREEZEREASON_INFECTION);
-				pGuiltyCharacter->SetEmote(EMOTE_PAIN, Server()->Tick() + Server()->TickSpeed() * GuiltyPlayerFreeze);
-			}
-		}
-		else
-		{
-			GameServer()->SendChatTarget_Localization(pPlayer->GetCID(), CHATCATEGORY_INFECTED,
-				_("You have been infected by {str:KillerName}"),
-				"KillerName", Server()->ClientName(pInfectiousPlayer->GetCID()),
-				nullptr);
-			GameServer()->SendChatTarget_Localization(InfectedByCID, CHATCATEGORY_SCORE,
-				_("You have infected {str:VictimName}, +3 points"),
-				"VictimName", Server()->ClientName(pPlayer->GetCID()),
-				nullptr);
-			Server()->RoundStatistics()->OnScoreEvent(InfectedByCID, SCOREEVENT_INFECTION,
-				pInfectiousPlayer->GetClass(), Server()->ClientName(InfectedByCID), GameServer()->Console());
-			GameServer()->SendScoreSound(InfectedByCID);
-		}
-	}
+	GameServer()->SendChatTarget_Localization(InfectedByCID, CHATCATEGORY_SCORE, _("You have infected {str:VictimName}, +3 points"), "VictimName", Server()->ClientName(pPlayer->GetCID()), NULL);
+	Server()->RoundStatistics()->OnScoreEvent(InfectedByCID, SCOREEVENT_INFECTION, pInfectiousPlayer->GetClass(), Server()->ClientName(InfectedByCID), GameServer()->Console());
+	GameServer()->SendScoreSound(InfectedByCID);
 
 	//Search for hook
 	for(CInfClassCharacter *pHook = (CInfClassCharacter*) GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_CHARACTER); pHook; pHook = (CInfClassCharacter *)pHook->TypeNext())
 	{
 		if(
 			pHook->GetPlayer() &&
-			pHook->GetHookedPlayer() == pPlayer->GetCID() &&
+			pHook->m_Core.m_HookedPlayer == pPlayer->GetCID() &&
 			pHook->GetCID() != InfectedByCID
 		)
 		{
@@ -187,7 +149,7 @@ bool CInfClassGameController::OnEntity(const char* pName, vec2 Pivot, vec2 P0, v
 
 void CInfClassGameController::HandleCharacterTiles(CCharacter *pChr)
 {
-	CInfClassCharacter *pCharacter = CInfClassCharacter::GetInstance(pChr);
+	CInfClassCharacter *pCharacter = CInfClassCharacter::fromCharacter(pChr);
 	int Index0 = GetDamageZoneValueAt(vec2(pChr->GetPos().x + pChr->GetProximityRadius() / 3.f, pChr->GetPos().y - pChr->GetProximityRadius() / 3.f));
 	int Index1 = GetDamageZoneValueAt(vec2(pChr->GetPos().x + pChr->GetProximityRadius() / 3.f, pChr->GetPos().y + pChr->GetProximityRadius() / 3.f));
 	int Index2 = GetDamageZoneValueAt(vec2(pChr->GetPos().x - pChr->GetProximityRadius() / 3.f, pChr->GetPos().y - pChr->GetProximityRadius() / 3.f));
@@ -227,65 +189,6 @@ void CInfClassGameController::HandleCharacterTiles(CCharacter *pChr)
 	}
 }
 
-void CInfClassGameController::HandleLastHookers()
-{
-	const int CurrentTick = Server()->Tick();
-	array_on_stack<int, MAX_CLIENTS> ActiveHooks;
-	ActiveHooks.Resize(MAX_CLIENTS);
-	for(int &HookId : ActiveHooks)
-	{
-		HookId = -1;
-	}
-
-	for(int i = 0; i < MAX_CLIENTS; ++i)
-	{
-		CInfClassCharacter *pCharacter = GetCharacter(i);
-		if(!pCharacter)
-		{
-			continue;
-		}
-
-		int HookedPlayer = pCharacter->GetHookedPlayer();
-		if(HookedPlayer < 0)
-		{
-			continue;
-		}
-
-		if(ActiveHooks[HookedPlayer] >= 0)
-		{
-			CInfClassCharacter *pCharacter = GetCharacter(HookedPlayer);
-			if(!pCharacter)
-			{
-				continue;
-			}
-			bool IsLastHooker = i == pCharacter->GetLastHooker();
-			if(!IsLastHooker)
-			{
-				// Only the last hooker has higher priority. Ignore the others for now.
-				continue;
-			}
-		}
-
-		ActiveHooks[HookedPlayer] = i;
-	}
-
-	for(int i = 0; i < ActiveHooks.Size(); ++i)
-	{
-		int NewHookerCID = ActiveHooks.At(i);
-		if(NewHookerCID < 0)
-		{
-			continue;
-		}
-		CInfClassCharacter *pHookedCharacter = GetCharacter(i);
-		if(!pHookedCharacter)
-		{
-			continue;
-		}
-
-		pHookedCharacter->UpdateLastHooker(NewHookerCID, CurrentTick);
-	}
-}
-
 int CInfClassGameController::GetZoneValueAt(int ZoneHandle, const vec2 &Pos) const
 {
 	return GameServer()->Collision()->GetZoneValueAt(ZoneHandle, Pos);
@@ -299,84 +202,6 @@ int CInfClassGameController::GetDamageZoneValueAt(const vec2 &Pos) const
 int CInfClassGameController::GetBonusZoneValueAt(const vec2 &Pos) const
 {
 	return GetZoneValueAt(GameServer()->m_ZoneHandle_icBonus, Pos);
-}
-
-void CInfClassGameController::CreateExplosion(const vec2 &Pos, int Owner, int Weapon, TAKEDAMAGEMODE TakeDamageMode, float DamageFactor)
-{
-	GameServer()->CreateExplosion(Pos, Owner, Weapon);
-	
-	if(DamageFactor != 0)
-	{
-		// deal damage
-		CInfClassCharacter *apEnts[MAX_CLIENTS];
-		float Radius = 135.0f;
-		float InnerRadius = 48.0f;
-		int Num = GameWorld()->FindEntities(Pos, Radius, (CEntity**)apEnts, MAX_CLIENTS, CGameWorld::ENTTYPE_CHARACTER);
-		for(int i = 0; i < Num; i++)
-		{
-			if(!Config()->m_InfShockwaveAffectHumans)
-			{
-				if(apEnts[i]->GetCID() == Owner)
-				{
-					//owner selfharm
-				}
-				else if(apEnts[i]->IsHuman())
-				{
-					continue;// humans are not affected by force
-				}
-			}
-			vec2 Diff = apEnts[i]->m_Pos - Pos;
-			vec2 ForceDir(0,1);
-			float l = length(Diff);
-			if(l)
-				ForceDir = normalize(Diff);
-			l = 1-clamp((l-InnerRadius)/(Radius-InnerRadius), 0.0f, 1.0f);
-			float Dmg = 6 * l * DamageFactor;
-			if((int)Dmg)
-			{
-				apEnts[i]->TakeDamage(ForceDir*Dmg*2, (int)Dmg, Owner, Weapon, TakeDamageMode);
-			}
-		}
-	}
-}
-
-// Thanks to Stitch for the idea
-void CInfClassGameController::CreateExplosionDisk(vec2 Pos, float InnerRadius, float DamageRadius, int Damage, float Force, int Owner, int Weapon, TAKEDAMAGEMODE TakeDamageMode)
-{
-	GameServer()->CreateExplosion(Pos, Owner, Weapon);
-
-	if(Damage > 0)
-	{
-		// deal damage
-		CCharacter *apEnts[MAX_CLIENTS];
-		int Num = GameWorld()->FindEntities(Pos, DamageRadius, (CEntity**)apEnts, MAX_CLIENTS, CGameWorld::ENTTYPE_CHARACTER);
-		for(int i = 0; i < Num; i++)
-		{
-			vec2 Diff = apEnts[i]->m_Pos - Pos;
-			if (Diff.x == 0.0f && Diff.y == 0.0f)
-				Diff.y = -0.5f;
-			vec2 ForceDir(0,1);
-			float len = length(Diff);
-			len = 1-clamp((len-InnerRadius)/(DamageRadius-InnerRadius), 0.0f, 1.0f);
-			
-			if(len)
-				ForceDir = normalize(Diff);
-			
-			float DamageToDeal = 1 + ((Damage - 1) * len);
-			apEnts[i]->TakeDamage(ForceDir*Force*len, DamageToDeal, Owner, Weapon, TakeDamageMode);
-		}
-	}
-	
-	float CircleLength = 2.0*pi*maximum(DamageRadius-135.0f, 0.0f);
-	int NumSuroundingExplosions = CircleLength/32.0f;
-	float AngleStart = random_float()*pi*2.0f;
-	float AngleStep = pi*2.0f/static_cast<float>(NumSuroundingExplosions);
-	const float Radius = (DamageRadius-135.0f);
-	for(int i=0; i<NumSuroundingExplosions; i++)
-	{
-		vec2 Offset = vec2(Radius * cos(AngleStart + i*AngleStep), Radius * sin(AngleStart + i*AngleStep));
-		GameServer()->CreateExplosion(Pos + Offset, Owner, Weapon);
-	}
 }
 
 void CInfClassGameController::ResetFinalExplosion()
@@ -754,7 +579,7 @@ int CInfClassGameController::MenuClassToPlayerClass(int MenuClass)
 
 void CInfClassGameController::RegisterChatCommands(IConsole *pConsole)
 {
-	pConsole->Register("inf_set_class", "i<clientid> s<classname>", CFGFLAG_SERVER, ConSetClass, this, "Set the class of a player");
+	pConsole->Register("inf_set_class", "is", CFGFLAG_SERVER, ConSetClass, this, "Set the class of a player");
 
 	pConsole->Register("witch", "", CFGFLAG_CHAT|CFGFLAG_USER, ChatWitch, this, "Call Witch");
 }
@@ -770,7 +595,7 @@ bool CInfClassGameController::ConSetClass(IConsole::IResult *pResult)
 	int PlayerID = pResult->GetInteger(0);
 	const char *pClassName = pResult->GetString(1);
 
-	CInfClassPlayer *pPlayer = GetPlayer(PlayerID);
+	CPlayer* pPlayer = GameServer()->m_apPlayers[PlayerID];
 
 	if(!pPlayer)
 		return true;
@@ -801,83 +626,59 @@ bool CInfClassGameController::ChatWitch(IConsole::IResult *pResult, void *pUserD
 bool CInfClassGameController::ChatWitch(IConsole::IResult *pResult)
 {
 	int ClientID = pResult->GetClientID();
+	int callers_count = m_WitchCallers.size();
 	const int REQUIRED_CALLERS_COUNT = 5;
 	const int MIN_ZOMBIES = 2;
 
-	GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "conwitch", "ChatWitch() called");
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "ConWitch() called");
+	GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "conwitch", aBuf);
 
-	if(GameServer()->GetZombieCount(PLAYERCLASS_WITCH) >= GetClassPlayerLimit(PLAYERCLASS_WITCH))
-	{
-		GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT, _("All witches are already here"), nullptr);
+	if (GameServer()->GetZombieCount(PLAYERCLASS_WITCH) >= Server()->GetClassPlayerLimit(PLAYERCLASS_WITCH)) {
+		str_format(aBuf, sizeof(aBuf), "All witches are already here");
+		GameServer()->SendChatTarget(ClientID, aBuf);
+		return true;
+	}
+	if (GameServer()->GetZombieCount() <= MIN_ZOMBIES) {
+		str_format(aBuf, sizeof(aBuf), "Too few zombies");
+		GameServer()->SendChatTarget(ClientID, aBuf);
 		return true;
 	}
 
-	int Humans = 0;
-	int Infected = 0;
-	GetPlayerCounter(-1, Humans, Infected);
-
-	if(Humans + Infected < REQUIRED_CALLERS_COUNT)
-	{
-		GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT, _("Too few players to call a witch"), nullptr);
-		return true;
-	}
-	if(Infected < MIN_ZOMBIES)
-	{
-		GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT, _("Too few infected to call a witch"), nullptr);
-		return true;
-	}
-
-	// It is possible that we had the needed callers but all witches already were there.
-	// In that case even if the caller is already in the list, we still want to spawn
-	// a new one without a message to the caller.
-	if(m_WitchCallers.Size() < REQUIRED_CALLERS_COUNT)
-	{
-		if(m_WitchCallers.Contains(ClientID))
+	if (callers_count < REQUIRED_CALLERS_COUNT) {
+		auto& wc = m_WitchCallers;
+		if(!(std::find(wc.begin(), wc.end(), ClientID) != wc.end()))
 		{
-			GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT, _("You can't call witch twice"), nullptr);
+			wc.push_back(ClientID); // add to witch callers vector
+			callers_count += 1;
+			if (callers_count == 1)
+				str_format(aBuf, sizeof(aBuf), "%s is calling for Witch! (%d/%d) To call witch write: /witch",
+						Server()->ClientName(ClientID), callers_count, REQUIRED_CALLERS_COUNT);
+			else
+				str_format(aBuf, sizeof(aBuf), "Witch (%d/%d)", callers_count, REQUIRED_CALLERS_COUNT);
+		}
+		else
+		{
+			str_format(aBuf, sizeof(aBuf), "You can't call witch twice");
+			GameServer()->SendChatTarget(ClientID, aBuf);
 			return true;
 		}
-
-		m_WitchCallers.Add(ClientID);
-
-		int PrintableRequiredCallers = REQUIRED_CALLERS_COUNT;
-		int PrintableCallers = m_WitchCallers.Size();
-		if(m_WitchCallers.Size() == 1)
-		{
-			GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT,
-				_("{str:PlayerName} is calling for Witch! (1/{int:RequiredCallers}) To call witch write: /witch"),
-				"PlayerName", Server()->ClientName(ClientID),
-				"RequiredCallers", &PrintableRequiredCallers,
-				nullptr);
-		}
-		else if(m_WitchCallers.Size() < REQUIRED_CALLERS_COUNT)
-		{
-			GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT,
-				_("Witch ({int:Callers}/{int:RequiredCallers})"),
-				"Callers", &PrintableCallers,
-				"RequiredCallers", &PrintableRequiredCallers,
-				nullptr);
-		}
 	}
 
-	if(m_WitchCallers.Size() >= REQUIRED_CALLERS_COUNT)
+	if (callers_count >= REQUIRED_CALLERS_COUNT)
 	{
 		int WitchId = RandomZombieToWitch();
 		if(WitchId < 0)
 		{
-			GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT,
-				_("All witches are already here"),
-				nullptr);
+			str_format(aBuf, sizeof(aBuf), "All witches are already here");
 		}
 		else
 		{
-			GameServer()->SendChatTarget_Localization(ClientID, CHATCATEGORY_DEFAULT,
-				_("Witch {str:PlayerName} has arrived!"),
-				"PlayerName", Server()->ClientName(WitchId),
-				nullptr);
+			str_format(aBuf, sizeof(aBuf), "Witch %s has arrived!", Server()->ClientName(WitchId));
 		}
 	}
 
+	GameServer()->SendChatTarget(-1, aBuf);
 	return true;
 }
 
@@ -952,59 +753,6 @@ void CInfClassGameController::GetSortedTargetsInRange(const vec2 &Center, const 
 	}
 }
 
-void CInfClassGameController::HandleTargetsToKill()
-{
-	//Target to kill
-	if(m_TargetToKill >= 0 && (!GetPlayer(m_TargetToKill) || !GetCharacter(m_TargetToKill) || !GetPlayer(m_TargetToKill)->IsActuallyZombie()))
-	{
-		m_TargetToKill = -1;
-	}
-
-	int LastTarget = -1;
-	// Zombie is in InfecZone too long -> change target
-	if(m_TargetToKill >= 0 && GetCharacter(m_TargetToKill) && (GetCharacter(m_TargetToKill)->GetInfZoneTick()*Server()->TickSpeed()) > 1000*Config()->m_InfNinjaTargetAfkTime)
-	{
-		LastTarget = m_TargetToKill;
-		m_TargetToKill = -1;
-	}
-
-	if(m_TargetToKillCoolDown > 0)
-		m_TargetToKillCoolDown--;
-
-	if((m_TargetToKillCoolDown == 0 && m_TargetToKill == -1))
-	{
-		int m_aTargetList[MAX_CLIENTS];
-		int NbTargets = 0;
-		int infectedCount = 0;
-		for(int i=0; i<MAX_CLIENTS; i++)
-		{
-			if(GetCharacter(i) && GetCharacter(i)->IsZombie() && GetPlayer(i)->GetClass() != PLAYERCLASS_UNDEAD)
-			{
-				if (GetCharacter(i)->GetInfZoneTick() * Server()->TickSpeed() < 1000*Config()->m_InfNinjaTargetAfkTime) // Make sure zombie is not camping in InfZone
-				{
-					m_aTargetList[NbTargets] = i;
-					NbTargets++;
-				}
-				infectedCount++;
-			}
-		}
-
-		if(NbTargets > 0)
-			m_TargetToKill = m_aTargetList[random_int(0, NbTargets-1)];
-
-		if(m_TargetToKill == -1)
-		{
-			if (LastTarget >= 0)
-				m_TargetToKill = LastTarget; // Reset Target if no new targets were found
-		}
-
-		if (infectedCount < g_Config.m_InfNinjaMinInfected)
-		{
-			m_TargetToKill = -1; // disable target system
-		}
-	}
-}
-
 void CInfClassGameController::ReservePlayerOwnSnapItems()
 {
 	m_PlayerOwnCursorID = Server()->SnapNewID();
@@ -1046,13 +794,12 @@ void CInfClassGameController::StartRound()
 
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
-		CInfClassPlayer *pPlayer = GetPlayer(i);
-		if(pPlayer)
+		if(GameServer()->m_apPlayers[i])
 		{
 			Server()->SetClientMemory(i, CLIENTMEMORY_ROUNDSTART_OR_MAPCHANGE, true);
-			pPlayer->SetClass(PLAYERCLASS_NONE);
-			pPlayer->m_ScoreRound = 0;
-			pPlayer->m_HumanTime = 0;
+			GameServer()->m_apPlayers[i]->SetClass(PLAYERCLASS_NONE);
+			GameServer()->m_apPlayers[i]->m_ScoreRound = 0;
+			GameServer()->m_apPlayers[i]->m_HumanTime = 0;
 		}
 	}
 }
@@ -1072,13 +819,13 @@ void CInfClassGameController::EndRound()
 	m_RoundStarted = false;
 }
 
-void CInfClassGameController::GetPlayerCounter(int ClientException, int& NumHumans, int& NumInfected)
+void CInfClassGameController::GetPlayerCounter(int ClientException, int& NumHumans, int& NumInfected, int& NumFirstInfected)
 {
 	NumHumans = 0;
 	NumInfected = 0;
 	
 	//Count type of players
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 	while(Iter.Next())
 	{
 		if(Iter.ClientID() == ClientException) continue;
@@ -1086,53 +833,31 @@ void CInfClassGameController::GetPlayerCounter(int ClientException, int& NumHuma
 		if(Iter.Player()->IsZombie()) NumInfected++;
 		else NumHumans++;
 	}
-}
+	
+	const int NumPlayers = NumHumans + NumInfected;
 
-int CInfClassGameController::GetMinimumInfectedForPlayers(int PlayersNumber) const
-{
-	int NumFirstInfected = 0;
-
-	if(PlayersNumber > 20)
+	if(NumPlayers > 20)
 		NumFirstInfected = 4;
-	else if(PlayersNumber > 8)
+	else if(NumPlayers > 8)
 		NumFirstInfected = 3;
-	else if(PlayersNumber > 3)
+	else if(NumPlayers > 3)
 		NumFirstInfected = 2;
-	else if(PlayersNumber > 1)
+	else if(NumPlayers > 1)
 		NumFirstInfected = 1;
 	else
 		NumFirstInfected = 0;
 
-	int FirstInfectedLimit = Config()->m_InfFirstInfectedLimit;
+	int FirstInfectedLimit = g_Config.m_InfFirstInfectedLimit;
 	if(FirstInfectedLimit && NumFirstInfected > FirstInfectedLimit)
 	{
 		NumFirstInfected = FirstInfectedLimit;
 	}
-
-	return NumFirstInfected;
 }
 
-int CInfClassGameController::GetMinimumInfected() const
-{
-	int NumPlayers = 0;
-	for(int i = 0; i < MAX_CLIENTS; ++i)
-	{
-		CInfClassPlayer *pPlayer = GetPlayer(i);
-		if(!pPlayer || !pPlayer->m_IsInGame || pPlayer->IsSpectator())
-		{
-			continue;
-		}
-		++NumPlayers;
-	}
+int CInfClassGameController::RandomZombieToWitch() {
+	std::vector<int> zombies_id;
 
-	return GetMinimumInfectedForPlayers(NumPlayers);
-}
-
-int CInfClassGameController::RandomZombieToWitch()
-{
-	ClientsArray zombies_id;
-
-	m_WitchCallers.Clear();
+	m_WitchCallers.clear();
 
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -1141,23 +866,23 @@ int CInfClassGameController::RandomZombieToWitch()
 		if(GameServer()->m_apPlayers[i]->GetClass() == PLAYERCLASS_WITCH)
 			continue;
 		if(GameServer()->m_apPlayers[i]->IsActuallyZombie()) {
-			zombies_id.Add(i);
+			zombies_id.push_back(i);
 		}
 	}
 
-	if(zombies_id.IsEmpty())
+	if(zombies_id.empty())
 	{
 		GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "witch", "Unable to find any suitable player");
 		return -1;
 	}
 
-	int id = random_int(0, zombies_id.Size() - 1);
+	int id = random_int(0, zombies_id.size() - 1);
 	char aBuf[512];
 	/* debug */
-	str_format(aBuf, sizeof(aBuf), "going through MAX_CLIENTS=%d, zombie_count=%d, random_int=%d, id=%d", MAX_CLIENTS, static_cast<int>(zombies_id.Size()), id, zombies_id[id]);
+	str_format(aBuf, sizeof(aBuf), "going through MAX_CLIENTS=%d, zombie_count=%d, random_int=%d, id=%d", MAX_CLIENTS, static_cast<int>(zombies_id.size()), id, zombies_id[id]);
 	GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "witch", aBuf);
 	/* /debug */
-	GetPlayer(zombies_id[id])->SetClass(PLAYERCLASS_WITCH);
+	GameServer()->m_apPlayers[zombies_id[id]]->SetClass(PLAYERCLASS_WITCH);
 	return zombies_id[id];
 }
 
@@ -1167,7 +892,7 @@ void CInfClassGameController::Tick()
 	
 	//Check session
 	{
-		CInfClassPlayerIterator<PLAYERITER_ALL> Iter(GameServer()->m_apPlayers);
+		CPlayerIterator<PLAYERITER_ALL> Iter(GameServer()->m_apPlayers);
 		while(Iter.Next())
 		{
 			//Update session
@@ -1199,37 +924,134 @@ void CInfClassGameController::Tick()
 	
 	int NumHumans = 0;
 	int NumInfected = 0;
-	GetPlayerCounter(-1, NumHumans, NumInfected);
-
-	const int NumPlayers = NumHumans + NumInfected;
-
+	int NumFirstInfected = 0;
+	GetPlayerCounter(-1, NumHumans, NumInfected, NumFirstInfected);
+	
 	m_InfectedStarted = false;
 
 	//If the game can start ...
-	if(m_GameOverTick == -1 && NumPlayers >= g_Config.m_InfMinPlayers)
+	if(m_GameOverTick == -1 && NumHumans + NumInfected >= g_Config.m_InfMinPlayers)
 	{
 		//If the infection started
 		if(IsInfectionStarted())
 		{
+			bool StartInfectionTrigger = (m_RoundStartTick + Server()->TickSpeed()*10 == Server()->Tick());
+			
+			if(StartInfectionTrigger)
+			{
+				MaybeSuggestMoreRounds();
+			}
+			GameServer()->EnableTargetToKill();
+			
 			m_InfectedStarted = true;
-			TickInfectionStarted();
+	
+			CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+			while(Iter.Next())
+			{
+				if(Iter.Player()->GetClass() == PLAYERCLASS_NONE)
+				{
+					if(StartInfectionTrigger)
+					{
+						Iter.Player()->SetClass(ChooseHumanClass(Iter.Player()));
+						if(Iter.Player()->GetCharacter())
+							Iter.Player()->GetCharacter()->IncreaseArmor(10);
+					}
+					else
+					{
+						Iter.Player()->StartInfection();
+						NumInfected++;
+						NumHumans--;
+					}
+				}
+			}
+			
+			int NumNeededInfection = NumFirstInfected;
+
+			while(NumInfected < NumNeededInfection)
+			{
+				// before infecting those who play, mark spectators as
+				// already infected. It will prevent issue causing a
+				// player getting infected several times in a row
+				CPlayerIterator<PLAYERITER_SPECTATORS> IterSpec(GameServer()->m_apPlayers);
+				while(IterSpec.Next())
+				{
+					IterSpec.Player()->SetClass(PLAYERCLASS_NONE);
+					Server()->InfecteClient(IterSpec.ClientID());
+				}
+
+				float InfectionProb = 1.0/static_cast<float>(NumHumans);
+				float random = random_float();
+				
+				//Fair infection
+				bool FairInfectionFound = false;
+				
+				Iter.Reset();
+				while(Iter.Next())
+				{
+					if(Iter.Player()->IsZombie()) continue;
+					
+					if(!Server()->IsClientInfectedBefore(Iter.ClientID()))
+					{
+						Server()->InfecteClient(Iter.ClientID());
+						Iter.Player()->StartInfection();
+						NumInfected++;
+						NumHumans--;
+						
+						GameServer()->SendChatTarget_Localization(-1, CHATCATEGORY_INFECTION, _("{str:VictimName} has been infected"),
+							"VictimName", Server()->ClientName(Iter.ClientID()),
+							NULL
+						);
+						FairInfectionFound = true;
+						break;
+					}
+				}
+				
+				//Unfair infection
+				if(!FairInfectionFound)
+				{
+					Iter.Reset();
+					while(Iter.Next())
+					{
+						if(Iter.Player()->IsZombie()) continue;
+						
+						if(random < InfectionProb)
+						{
+							Server()->InfecteClient(Iter.ClientID());
+							Iter.Player()->StartInfection();
+							NumInfected++;
+							NumHumans--;
+							
+							GameServer()->SendChatTarget_Localization(-1, CHATCATEGORY_INFECTION, _("{str:VictimName} has been infected"), "VictimName", Server()->ClientName(Iter.ClientID()), NULL);
+							
+							break;
+						}
+						else
+						{
+							random -= InfectionProb;
+						}
+					}
+				}
+			}
 		}
 		else
-		{
-			TickInfectionNotStarted();
+		{			
+			GameServer()->DisableTargetToKill();
+			
+			CPlayerIterator<PLAYERITER_SPECTATORS> IterSpec(GameServer()->m_apPlayers);
+			while(IterSpec.Next())
+			{
+				IterSpec.Player()->SetClass(PLAYERCLASS_NONE);
+			}
 		}
 
 		DoWincheck();
 	}
 	else
 	{
-		DisableTargetToKill();
+		GameServer()->DisableTargetToKill();
 		
 		m_RoundStartTick = Server()->Tick();
 	}
-
-	HandleTargetsToKill();
-	HandleLastHookers();
 
 	if(m_SuggestMoreRounds && !GameServer()->HasActiveVote())
 	{
@@ -1245,180 +1067,34 @@ void CInfClassGameController::Tick()
 	}
 }
 
-void CInfClassGameController::TickInfectionStarted()
-{
-	bool StartInfectionTrigger = m_RoundStartTick + Server()->TickSpeed()*10 == Server()->Tick();
-
-	if(StartInfectionTrigger)
-	{
-		MaybeSuggestMoreRounds();
-	}
-	EnableTargetToKill();
-
-	int NumHumans = 0;
-	int NumInfected = 0;
-	GetPlayerCounter(-1, NumHumans, NumInfected);
-
-	const int NumPlayers = NumHumans + NumInfected;
-	const int NumFirstInfected = GetMinimumInfectedForPlayers(NumPlayers);
-
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
-	while(Iter.Next())
-	{
-		// Set the player class if not set yet
-		if(Iter.Player()->GetClass() == PLAYERCLASS_NONE)
-		{
-			if(StartInfectionTrigger)
-			{
-				Iter.Player()->SetClass(ChooseHumanClass(Iter.Player()));
-				CInfClassCharacter *pCharacter = Iter.Player()->GetCharacter();
-				if(pCharacter)
-				{
-					pCharacter->GiveRandomClassSelectionBonus();
-				}
-			}
-			else
-			{
-				Iter.Player()->StartInfection();
-				NumInfected++;
-				NumHumans--;
-			}
-		}
-	}
-
-	int NumNeededInfection = NumFirstInfected;
-
-	while(NumInfected < NumNeededInfection)
-	{
-		// before infecting those who play, mark spectators as
-		// already infected. It will prevent issue causing a
-		// player getting infected several times in a row
-		CInfClassPlayerIterator<PLAYERITER_SPECTATORS> IterSpec(GameServer()->m_apPlayers);
-		while(IterSpec.Next())
-		{
-			IterSpec.Player()->SetClass(PLAYERCLASS_NONE);
-			Server()->InfecteClient(IterSpec.ClientID());
-		}
-
-		float InfectionProb = 1.0/static_cast<float>(NumHumans);
-		float random = random_float();
-
-		//Fair infection
-		bool FairInfectionFound = false;
-
-		Iter.Reset();
-		while(Iter.Next())
-		{
-			CInfClassPlayer *pPlayer = Iter.Player();
-			if(pPlayer->IsZombie())
-			{
-				pPlayer->KillCharacter(); // Infect the player
-				pPlayer->m_DieTick = m_RoundStartTick;
-				continue;
-			}
-
-			if(!Server()->IsClientInfectedBefore(pPlayer->GetCID()))
-			{
-				Server()->InfecteClient(pPlayer->GetCID());
-				pPlayer->KillCharacter(); // Infect the player
-				pPlayer->StartInfection();
-				pPlayer->m_DieTick = m_RoundStartTick;
-				NumInfected++;
-				NumHumans--;
-
-				GameServer()->SendChatTarget_Localization(-1, CHATCATEGORY_INFECTION,
-					_("{str:VictimName} has been infected"),
-					"VictimName", Server()->ClientName(pPlayer->GetCID()),
-					NULL);
-
-				FairInfectionFound = true;
-				break;
-			}
-		}
-
-		//Unfair infection
-		if(!FairInfectionFound)
-		{
-			Iter.Reset();
-			while(Iter.Next())
-			{
-				CInfClassPlayer *pPlayer = Iter.Player();
-				if(pPlayer->IsZombie())
-					continue;
-
-				if(random < InfectionProb)
-				{
-					Server()->InfecteClient(pPlayer->GetCID());
-					pPlayer->KillCharacter(); // Infect the player
-					pPlayer->StartInfection();
-					pPlayer->m_DieTick = m_RoundStartTick;
-
-					NumInfected++;
-					NumHumans--;
-
-					GameServer()->SendChatTarget_Localization(-1, CHATCATEGORY_INFECTION,
-						_("{str:VictimName} has been infected"),
-						"VictimName", Server()->ClientName(pPlayer->GetCID()),
-						NULL);
-
-					break;
-				}
-				else
-				{
-					random -= InfectionProb;
-				}
-			}
-		}
-	}
-}
-
-void CInfClassGameController::TickInfectionNotStarted()
-{
-	DisableTargetToKill();
-
-	CInfClassPlayerIterator<PLAYERITER_SPECTATORS> IterSpec(GameServer()->m_apPlayers);
-	while(IterSpec.Next())
-	{
-		IterSpec.Player()->SetClass(PLAYERCLASS_NONE);
-	}
-}
-
-bool CInfClassGameController::IsInfectionStarted() const
+bool CInfClassGameController::IsInfectionStarted()
 {
 	return (m_RoundStartTick + Server()->TickSpeed()*10 <= Server()->Tick());
 }
 
-bool CInfClassGameController::CanJoinTeam(int Team, int ClientID)
+bool CInfClassGameController::PortalsAvailableForCharacter(class CCharacter *pCharacter)
 {
-	if(Team != TEAM_SPECTATORS)
-	{
-		return IGameController::CanJoinTeam(Team, ClientID);
-	}
-
-	if (IsGameOver())
-		return true;
-
-	CInfClassPlayer *pPlayer = GetPlayer(ClientID);
-
-	if(!pPlayer) // Invalid call
+	if (!g_Config.m_InfEnableWitchPortals)
 		return false;
 
-	if (pPlayer->IsHuman())
-		return true;
+	if (GameServer()->m_FunRound)
+		return false;
 
-	int NumHumans;
-	int NumInfected;
-	GetPlayerCounter(ClientID, NumHumans, NumInfected);
-	const int NumPlayers = NumHumans + NumInfected;
-	const int NumMinInfected = GetMinimumInfectedForPlayers(NumPlayers);
-	if(NumInfected >= NumMinInfected)
+	if (pCharacter->GetPlayerClass() != PLAYERCLASS_WITCH)
+		return false;
+
+	for(int ClientID = 0; ClientID < MAX_CLIENTS; ++ClientID)
 	{
-		// Let the ClientID join the specs if we'll not have to infect
-		// someone after the join.
-		return true;
+		CInfClassCharacter *pAnotherCharacter = GetCharacter(ClientID);
+		if(!pAnotherCharacter)
+			continue;
+		if(pAnotherCharacter == pCharacter)
+			continue;
+		if(pAnotherCharacter->CanOpenPortals())
+			return false;
 	}
 
-	return false;
+	return true;
 }
 
 bool CInfClassGameController::AreTurretsEnabled() const
@@ -1429,24 +1105,7 @@ bool CInfClassGameController::AreTurretsEnabled() const
 	if(m_RoundStarted)
 		return m_TurretsEnabled;
 
-	return Server()->GetActivePlayerCount() >= Config()->m_InfMinPlayersForTurrets;
-}
-
-int CInfClassGameController::GetTargetToKill() const
-{
-	return m_TargetToKill;
-}
-
-void CInfClassGameController::TargetKilled()
-{
-	m_TargetToKill = -1;
-
-	int PlayerCounter = 0;
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
-	while(Iter.Next())
-		PlayerCounter++;
-
-	m_TargetToKillCoolDown = Server()->TickSpeed()*(10 + 3*maximum(0, 16 - PlayerCounter));
+	 return Server()->GetActivePlayerCount() >= Config()->m_InfMinPlayersForTurrets;
 }
 
 void CInfClassGameController::Snap(int SnappingClient)
@@ -1479,7 +1138,7 @@ void CInfClassGameController::Snap(int SnappingClient)
 		return;
 
 	//Search for witch
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 	while(Iter.Next())
 	{
 		if(Iter.Player()->GetClass() == PLAYERCLASS_WITCH)
@@ -1502,12 +1161,6 @@ CPlayer *CInfClassGameController::CreatePlayer(int ClientID)
 	{
 		const int StartTeam = Config()->m_SvTournamentMode ? TEAM_SPECTATORS : GetAutoTeam(ClientID);
 		pPlayer = new(ClientID) CInfClassPlayer(this, ClientID, StartTeam);
-	}
-
-	if(IsInfectionStarted())
-	{
-		int c = ChooseInfectedClass(pPlayer);
-		pPlayer->SetClass(c);
 	}
 
 	return pPlayer;
@@ -1533,7 +1186,7 @@ void CInfClassGameController::SnapMapMenu(int SnappingClient, CNetObj_GameInfo *
 		int Hero = 0;
 		int Support = 0;
 
-		CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+		CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 		while(Iter.Next())
 		{
 			switch(Iter.Player()->GetClass())
@@ -1592,19 +1245,6 @@ void CInfClassGameController::RewardTheKiller(CInfClassCharacter *pVictim, CInfC
 	if(pKiller != pVictim->GetPlayer())
 	{
 		pKiller->IncreaseNumberKills();
-
-		CInfClassCharacter *pKillerCharacter = pKiller->GetCharacter();
-		if(pKillerCharacter)
-		{
-			// set attacker's face to happy (taunt!)
-			pKillerCharacter->SetEmote(EMOTE_HAPPY, Server()->Tick() + Server()->TickSpeed());
-			pKillerCharacter->CheckSuperWeaponAccess();
-
-			if(pKillerCharacter->GetPlayerClass() == PLAYERCLASS_MERCENARY)
-			{
-				pKillerCharacter->AddAmmo(WEAPON_LASER, 3);
-			}
-		}
 	}
 
 	if(pKiller->IsHuman())
@@ -1615,36 +1255,29 @@ void CInfClassGameController::RewardTheKiller(CInfClassCharacter *pVictim, CInfC
 		}
 		else
 		{
-			if(pVictim->IsZombie())
+			if(pVictim->GetPlayerClass() == PLAYERCLASS_WITCH)
 			{
-				int ScoreEvent = SCOREEVENT_KILL_INFECTED;
-				bool ClassSpecialProcessingEnabled = !GameServer()->m_FunRound || (GetPlayerClassProbability(pVictim->GetPlayerClass()) == 0);
-				if(ClassSpecialProcessingEnabled)
-				{
-					switch(pVictim->GetPlayerClass())
-					{
-						case PLAYERCLASS_WITCH:
-							ScoreEvent = SCOREEVENT_KILL_WITCH;
-							GameServer()->SendChatTarget_Localization(pKiller->GetCID(), CHATCATEGORY_SCORE, _("You have killed a witch, +5 points"), NULL);
-							break;
-						case PLAYERCLASS_UNDEAD:
-							ScoreEvent = SCOREEVENT_KILL_UNDEAD;
-							GameServer()->SendChatTarget_Localization(pKiller->GetCID(), CHATCATEGORY_SCORE, _("You have killed an undead! +5 points"), NULL);
-							break;
-						default:
-							break;
-					}
-				}
-
-				Server()->RoundStatistics()->OnScoreEvent(pKiller->GetCID(), ScoreEvent, pKiller->GetClass(), Server()->ClientName(pKiller->GetCID()), GameServer()->Console());
+				GameServer()->SendChatTarget_Localization(pKiller->GetCID(), CHATCATEGORY_SCORE, _("You have killed a witch, +5 points"), NULL);
+				Server()->RoundStatistics()->OnScoreEvent(pKiller->GetCID(), SCOREEVENT_KILL_WITCH, pKiller->GetClass(), Server()->ClientName(pKiller->GetCID()), GameServer()->Console());
+				GameServer()->SendScoreSound(pKiller->GetCID());
+			}
+			else if(pVictim->GetPlayerClass() == PLAYERCLASS_UNDEAD)
+			{
+				GameServer()->SendChatTarget_Localization(pKiller->GetCID(), CHATCATEGORY_SCORE, _("You have killed an undead! +5 points"), NULL);
+				Server()->RoundStatistics()->OnScoreEvent(pKiller->GetCID(), SCOREEVENT_KILL_UNDEAD, pKiller->GetClass(), Server()->ClientName(pKiller->GetCID()), GameServer()->Console());
+				GameServer()->SendScoreSound(pKiller->GetCID());
+			}
+			else if(pVictim->IsZombie())
+			{
+				Server()->RoundStatistics()->OnScoreEvent(pKiller->GetCID(), SCOREEVENT_KILL_INFECTED, pKiller->GetClass(), Server()->ClientName(pKiller->GetCID()), GameServer()->Console());
 				GameServer()->SendScoreSound(pKiller->GetCID());
 			}
 		
-			if(pKiller->GetClass() == PLAYERCLASS_NINJA && pVictim->GetCID() == GetTargetToKill())
+			if(pKiller->GetClass() == PLAYERCLASS_NINJA && pVictim->GetCID() == GameServer()->GetTargetToKill())
 			{
 				GameServer()->SendChatTarget_Localization(pKiller->GetCID(), CHATCATEGORY_SCORE, _("You have eliminated your target, +2 points"), NULL);
 				Server()->RoundStatistics()->OnScoreEvent(pKiller->GetCID(), SCOREEVENT_KILL_TARGET, pKiller->GetClass(), Server()->ClientName(pKiller->GetCID()), GameServer()->Console());
-				TargetKilled();
+				GameServer()->TargetKilled();
 				
 				if(pKiller->GetCharacter())
 				{
@@ -1660,12 +1293,12 @@ void CInfClassGameController::RewardTheKiller(CInfClassCharacter *pVictim, CInfC
 
 int CInfClassGameController::OnCharacterDeath(class CCharacter *pAbstractVictim, class CPlayer *pAbstractKiller, int Weapon)
 {
-	CInfClassCharacter *pVictim = CInfClassCharacter::GetInstance(pAbstractVictim);
+	CInfClassCharacter *pVictim = CInfClassCharacter::fromCharacter(pAbstractVictim);
 	CInfClassPlayer *pKiller = static_cast<CInfClassPlayer *>(pAbstractKiller);
 	RewardTheKiller(pVictim, pKiller, Weapon);
 
 	//Add bonus point for ninja
-	if(pVictim->IsZombie() && pVictim->IsFrozen() && pVictim->m_LastFreezer >= 0)
+	if(pVictim->IsZombie() && pVictim->IsFrozen() && pVictim->m_LastFreezer >= 0 && pVictim->m_LastFreezer)
 	{
 		CInfClassPlayer *pFreezer = GetPlayer(pVictim->m_LastFreezer);
 		if(pFreezer && pFreezer != pKiller)
@@ -1675,11 +1308,11 @@ int CInfClassGameController::OnCharacterDeath(class CCharacter *pAbstractVictim,
 				Server()->RoundStatistics()->OnScoreEvent(pFreezer->GetCID(), SCOREEVENT_HELP_FREEZE, pFreezer->GetClass(), Server()->ClientName(pFreezer->GetCID()), GameServer()->Console());
 				GameServer()->SendScoreSound(pFreezer->GetCID());
 				
-				if(pVictim->GetCID() == GetTargetToKill())
+				if(pVictim->GetCID() == GameServer()->GetTargetToKill())
 				{
 					GameServer()->SendChatTarget_Localization(pFreezer->GetCID(), CHATCATEGORY_SCORE, _("You have eliminated your target, +2 points"), NULL);
 					Server()->RoundStatistics()->OnScoreEvent(pFreezer->GetCID(), SCOREEVENT_KILL_TARGET, pFreezer->GetClass(), Server()->ClientName(pFreezer->GetCID()), GameServer()->Console());
-					TargetKilled();
+					GameServer()->TargetKilled();
 					
 					if(pFreezer->GetCharacter())
 					{
@@ -1711,74 +1344,24 @@ int CInfClassGameController::OnCharacterDeath(class CCharacter *pAbstractVictim,
 	
 	if(Weapon == WEAPON_SELF)
 		pVictim->GetPlayer()->m_RespawnTick = Server()->Tick()+Server()->TickSpeed()*3.0f;
-
-	// It is important to SendKillMessage before GetClass()->OnCharacterDeath() to keep the correct kill order
-	int Killer = pKiller ? pKiller->GetCID() : -1;
-	char aBuf[256];
-	str_format(aBuf, sizeof(aBuf), "kill killer='%s' victim='%s' weapon=%d",
-		Server()->ClientName(Killer),
-		Server()->ClientName(pVictim->GetCID()), Weapon);
-	GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "game", aBuf);
-
-	const int ModeSpecial = 0;
-	GameServer()->SendKillMessage(Killer, pVictim->GetCID(), Weapon, ModeSpecial);
-
-	pVictim->GetClass()->OnCharacterDeath(Weapon);
-
-	bool ForceInfection = false;
-	bool ClassSpecialProcessingEnabled = true;
-	if(GameServer()->m_FunRound && !pVictim->IsHuman() && GetPlayerClassProbability(pVictim->GetPlayerClass()))
-	{
-		ClassSpecialProcessingEnabled = false;
-	}
-
-	if(ClassSpecialProcessingEnabled)
-	{
-		switch(pVictim->GetPlayerClass())
-		{
-			case PLAYERCLASS_WITCH:
-				GameServer()->SendBroadcast_Localization(-1, BROADCAST_PRIORITY_GAMEANNOUNCE, BROADCAST_DURATION_GAMEANNOUNCE, _("The witch is dead"), NULL);
-				GameServer()->CreateSoundGlobal(SOUND_CTF_RETURN);
-				ForceInfection = true;
-				break;
-			case PLAYERCLASS_UNDEAD:
-				GameServer()->SendBroadcast_Localization(-1, BROADCAST_PRIORITY_GAMEANNOUNCE, BROADCAST_DURATION_GAMEANNOUNCE, _("The undead is finally dead"), NULL);
-				GameServer()->CreateSoundGlobal(SOUND_CTF_RETURN);
-				ForceInfection = true;
-				break;
-			default:
-				break;
-		}
-	}
-	else
-	{
-		// Still send the traditional 'whoosh' sound
-		if(pVictim->GetPlayerClass() == PLAYERCLASS_WITCH)
-		{
-			GameServer()->CreateSoundGlobal(SOUND_CTF_RETURN);
-		}
-	}
-	pVictim->GetPlayer()->StartInfection(ForceInfection, pKiller);
-
+		
 	return 0;
 }
 
-void CInfClassGameController::OnCharacterSpawned(CInfClassCharacter *pCharacter)
+void CInfClassGameController::OnCharacterSpawn(class CCharacter *pChr)
 {
-	if(GameServer()->m_FunRound && !IsInfectionStarted() && pCharacter->GetPlayerClass() == PLAYERCLASS_NONE)
+	// default health
+	pChr->IncreaseHealth(10);
+
+	// give default weapons
+	pChr->GiveWeapon(WEAPON_HAMMER, -1);
+
+	if(GameServer()->m_FunRound && !IsInfectionStarted() && pChr->GetPlayerClass() == PLAYERCLASS_NONE)
 	{
-		CInfClassPlayer *pPlayer = pCharacter->GetPlayer();
+		CPlayer *pPlayer = pChr->GetPlayer();
 		if(pPlayer)
 		{
 			pPlayer->SetClass(ChooseHumanClass(pPlayer));
-		}
-	}
-
-	if(pCharacter->IsZombie())
-	{
-		if((GetMinimumInfected() == 1) && (GameServer()->GetZombieCount() == 1))
-		{
-			pCharacter->GiveLonelyZombieBonus();
 		}
 	}
 }
@@ -1795,10 +1378,17 @@ void CInfClassGameController::DoWincheck()
 {
 	int NumHumans = 0;
 	int NumInfected = 0;
-	GetPlayerCounter(-1, NumHumans, NumInfected);
+	int NumFirstInfected = 0;
+	GetPlayerCounter(-1, NumHumans, NumInfected, NumFirstInfected);
 
 	static const char *ClassicRound = "classic";
+	static const char *WitchPortalsRound = "witch_portals";
 	const char *RoundType = ClassicRound;
+
+	if (g_Config.m_InfEnableWitchPortals)
+	{
+		RoundType = WitchPortalsRound;
+	}
 
 	//Win check
 	const int Seconds = (Server()->Tick()-m_RoundStartTick)/((float)Server()->TickSpeed());
@@ -1853,8 +1443,7 @@ void CInfClassGameController::DoWincheck()
 					if(random_prob(0.1f))
 					{
 						vec2 TilePos = vec2(16.0f, 16.0f) + vec2(i*32.0f, j*32.0f);
-						static const int Damage = 0;
-						CreateExplosion(TilePos, -1, WEAPON_GAME, TAKEDAMAGEMODE::NOINFECTION, Damage);
+						GameServer()->CreateExplosion(TilePos, -1, WEAPON_GAME, true);
 						GameServer()->CreateSound(TilePos, SOUND_GRENADE_EXPLODE);
 					}
 				}
@@ -1903,7 +1492,7 @@ void CInfClassGameController::DoWincheck()
 				str_format(aBuf, sizeof(aBuf), "round_end winner='humans' survivors='%d' duration='%d' round='%d of %d' type='%s'", NumHumans, Seconds, m_RoundCount+1, g_Config.m_SvRoundsPerMap, RoundType);
 				GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "game", aBuf);
 
-					CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+					CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 				while(Iter.Next())
 				{
 					if(Iter.Player()->IsHuman())
@@ -1965,20 +1554,12 @@ bool CInfClassGameController::IsSpawnable(vec2 Pos, int TeleZoneIndex)
 	return true;
 }
 
-bool CInfClassGameController::TryRespawn(CInfClassPlayer *pPlayer, SpawnContext *pContext)
+bool CInfClassGameController::PreSpawn(CPlayer* pPlayer, vec2 *pOutPos)
 {
 	// spectators can't spawn
 	if(pPlayer->GetTeam() == TEAM_SPECTATORS)
 		return false;
-
-	// Deny any spawns during the World ResetRequested because the new Characters
-	// are going to be destroyed during this IGameServer::Tick().
-	// (and it may break the auto class selection)
-	if(GameServer()->m_World.m_ResetRequested)
-	{
-		return false;
-	}
-
+	
 	if(m_InfectedStarted)
 		pPlayer->StartInfection();
 		
@@ -1987,16 +1568,18 @@ bool CInfClassGameController::TryRespawn(CInfClassPlayer *pPlayer, SpawnContext 
 		
 	if(m_InfectedStarted && pPlayer->IsZombie() && random_prob(g_Config.m_InfProbaSpawnNearWitch / 100.0f))
 	{
-		CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+		CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 		while(Iter.Next())
 		{
 			if(Iter.Player()->GetCID() == pPlayer->GetCID()) continue;
 			if(Iter.Player()->GetClass() != PLAYERCLASS_WITCH) continue;
 			if(!Iter.Player()->GetCharacter()) continue;
-
-			if(Iter.Player()->GetCharacter()->FindWitchSpawnPosition(pContext->SpawnPos))
+			if (Iter.Player()->GetCharacter()->HasPortal()) continue;
+			
+			vec2 SpawnPos;
+			if(Iter.Player()->GetCharacter()->FindWitchSpawnPosition(SpawnPos))
 			{
-				pContext->SpawnType = SpawnContext::WitchSpawn;
+				*pOutPos = SpawnPos;
 				return true;
 			}
 		}
@@ -2017,8 +1600,7 @@ bool CInfClassGameController::TryRespawn(CInfClassPlayer *pPlayer, SpawnContext 
 		int I = (i + RandomShift)%m_SpawnPoints[Type].size();
 		if(IsSpawnable(m_SpawnPoints[Type][I], 0))
 		{
-			pContext->SpawnPos = m_SpawnPoints[Type][I];
-			pContext->SpawnType = SpawnContext::WitchSpawn;
+			*pOutPos = m_SpawnPoints[Type][I];
 			return true;
 		}
 	}
@@ -2035,7 +1617,7 @@ int CInfClassGameController::ChooseHumanClass(const CPlayer *pPlayer) const
 	for (int PlayerClass = START_HUMANCLASS + 1; PlayerClass < END_HUMANCLASS; ++PlayerClass)
 		nbClass[PlayerClass] = 0;
 
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);	
 	while(Iter.Next())
 	{
 		const int AnotherPlayerClass = Iter.Player()->GetClass();
@@ -2053,18 +1635,27 @@ int CInfClassGameController::ChooseHumanClass(const CPlayer *pPlayer) const
 	for (int PlayerClass = START_HUMANCLASS + 1; PlayerClass < END_HUMANCLASS; ++PlayerClass)
 	{
 		double &ClassProbability = Probability[PlayerClass - START_HUMANCLASS - 1];
-		ClassProbability = GetPlayerClassEnabled(PlayerClass) ? 1.0f : 0.0f;
+		ClassProbability = Server()->GetPlayerClassEnabled(PlayerClass) ? 1.0f : 0.0f;
 		if (GameServer()->m_FunRound)
 		{
 			// We care only about the class enablement
 			continue;
 		}
 
-		CLASS_AVAILABILITY Availability = GetPlayerClassAvailability(PlayerClass);
-		if(Availability != CLASS_AVAILABILITY::AVAILABLE)
-		{
+		if (IsDefenderClass(PlayerClass) && (nbDefender >= g_Config.m_InfDefenderLimit))
 			ClassProbability = 0.0f;
-		}
+
+		if (IsSupportClass(PlayerClass) && (nbSupport >= g_Config.m_InfSupportLimit))
+			ClassProbability = 0.0f;
+
+		if (nbClass[PlayerClass] >= Server()->GetClassPlayerLimit(PlayerClass))
+			ClassProbability = 0.0f;
+
+		// Honor the players count
+		int ActivePlayerCount = Server()->GetActivePlayerCount();
+		int MinPlayersForClass = Server()->GetMinPlayersForClass(PlayerClass);
+		if (ActivePlayerCount < MinPlayersForClass)
+			ClassProbability = 0.0f;
 	}
 
 	//Random is not fair enough. We keep the last two classes took by the player, and avoid to give him those again
@@ -2089,23 +1680,19 @@ int CInfClassGameController::ChooseInfectedClass(const CPlayer *pPlayer) const
 	for (int PlayerClass = START_INFECTEDCLASS + 1; PlayerClass < END_INFECTEDCLASS; ++PlayerClass)
 		nbClass[PlayerClass] = 0;
 
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
-	int PlayersCount = 0;
+	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 	while(Iter.Next())
 	{
-		++PlayersCount;
 		const int AnotherPlayerClass = Iter.Player()->GetClass();
 		if(Iter.Player()->IsZombie()) nbInfected++;
 		nbClass[AnotherPlayerClass]++;
 	}
-
-	int InitiallyInfected = GetMinimumInfectedForPlayers(PlayersCount);
 	
 	double Probability[NB_INFECTEDCLASS];
 	for (int PlayerClass = START_INFECTEDCLASS + 1; PlayerClass < END_INFECTEDCLASS; ++PlayerClass)
 	{
 		double &ClassProbability = Probability[PlayerClass - START_INFECTEDCLASS - 1];
-		ClassProbability = Server()->GetClassAvailability(PlayerClass) ? GetPlayerClassProbability(PlayerClass) : 0;
+		ClassProbability = Server()->GetClassAvailability(PlayerClass) ? Server()->GetPlayerClassProbability(PlayerClass) : 0;
 		if (GameServer()->m_FunRound)
 		{
 			// We care only about the class enablement
@@ -2114,14 +1701,6 @@ int CInfClassGameController::ChooseInfectedClass(const CPlayer *pPlayer) const
 
 		switch(PlayerClass)
 		{
-			case PLAYERCLASS_BAT:
-				if(nbInfected <= InitiallyInfected)
-				{
-					// We can't just set the proba to 0, because it would break a config
-					// with all classes except the Bat set to 0.
-					ClassProbability = ClassProbability / 10000.0;
-				}
-				break;
 			case PLAYERCLASS_GHOUL:
 				if (nbInfected < g_Config.m_InfGhoulThreshold)
 					ClassProbability = 0;
@@ -2147,8 +1726,7 @@ int CInfClassGameController::ChooseInfectedClass(const CPlayer *pPlayer) const
 	return Class;
 }
 
-bool CInfClassGameController::GetPlayerClassEnabled(int PlayerClass) const
-{
+bool CInfClassGameController::IsEnabledClass(int PlayerClass) {
 	switch(PlayerClass)
 	{
 		case PLAYERCLASS_ENGINEER:
@@ -2176,71 +1754,13 @@ bool CInfClassGameController::GetPlayerClassEnabled(int PlayerClass) const
 	}
 }
 
-int CInfClassGameController::GetMinPlayersForClass(int PlayerClass) const
+CLASS_AVAILABILITY CInfClassGameController::GetPlayerClassAvailability(int PlayerClass)
 {
-	switch (PlayerClass)
-	{
-		case PLAYERCLASS_ENGINEER:
-			return g_Config.m_InfMinPlayersForEngineer;
-		default:
-			return 0;
-	}
-}
-
-int CInfClassGameController::GetClassPlayerLimit(int PlayerClass) const
-{
-	switch (PlayerClass)
-	{
-		case PLAYERCLASS_MEDIC:
-			return g_Config.m_InfMedicLimit;
-		case PLAYERCLASS_HERO:
-			return g_Config.m_InfHeroLimit;
-		case PLAYERCLASS_WITCH:
-			return g_Config.m_InfWitchLimit;
-		default:
-			return g_Config.m_SvMaxClients;
-	}
-}
-
-int CInfClassGameController::GetPlayerClassProbability(int PlayerClass) const
-{
-	switch (PlayerClass)
-	{
-		case PLAYERCLASS_SMOKER:
-			return g_Config.m_InfProbaSmoker;
-		case PLAYERCLASS_BOOMER:
-			return g_Config.m_InfProbaBoomer;
-		case PLAYERCLASS_HUNTER:
-			return g_Config.m_InfProbaHunter;
-		case PLAYERCLASS_BAT:
-			return g_Config.m_InfProbaBat;
-		case PLAYERCLASS_GHOST:
-			return g_Config.m_InfProbaGhost;
-		case PLAYERCLASS_SPIDER:
-			return g_Config.m_InfProbaSpider;
-		case PLAYERCLASS_GHOUL:
-			return g_Config.m_InfProbaGhoul;
-		case PLAYERCLASS_SLUG:
-			return g_Config.m_InfProbaSlug;
-		case PLAYERCLASS_VOODOO:
-			return g_Config.m_InfProbaVoodoo;
-		case PLAYERCLASS_WITCH:
-			return g_Config.m_InfProbaWitch;
-		case PLAYERCLASS_UNDEAD:
-			return g_Config.m_InfProbaUndead;
-		default:
-			GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", "WARNING: Invalid GetPlayerClassProbability() call");
-			return false;
-	}
-}
-
-CLASS_AVAILABILITY CInfClassGameController::GetPlayerClassAvailability(int PlayerClass) const
-{
-	if (!GetPlayerClassEnabled(PlayerClass))
+	if (!IsEnabledClass(PlayerClass))
 		return CLASS_AVAILABILITY::DISABLED;
 
 	int ActivePlayerCount = Server()->GetActivePlayerCount();
-	int MinPlayersForClass = GetMinPlayersForClass(PlayerClass);
+	int MinPlayersForClass = Server()->GetMinPlayersForClass(PlayerClass);
 	if (ActivePlayerCount < MinPlayersForClass)
 		return CLASS_AVAILABILITY::NEED_MORE_PLAYERS;
 
@@ -2250,7 +1770,7 @@ CLASS_AVAILABILITY CInfClassGameController::GetPlayerClassAvailability(int Playe
 	for (int PlayerClass = START_HUMANCLASS + 1; PlayerClass < END_HUMANCLASS; ++PlayerClass)
 		nbClass[PlayerClass] = 0;
 
-	CInfClassPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
 	while(Iter.Next())
 	{
 		const int AnotherPlayerClass = Iter.Player()->GetClass();
@@ -2269,7 +1789,7 @@ CLASS_AVAILABILITY CInfClassGameController::GetPlayerClassAvailability(int Playe
 	if (IsSupportClass(PlayerClass) && (nbSupport >= g_Config.m_InfSupportLimit))
 		return CLASS_AVAILABILITY::LIMIT_EXCEEDED;
 
-	if (nbClass[PlayerClass] >= GetClassPlayerLimit(PlayerClass))
+	if (nbClass[PlayerClass] >= Server()->GetClassPlayerLimit(PlayerClass))
 		return CLASS_AVAILABILITY::LIMIT_EXCEEDED;
 	
 	return CLASS_AVAILABILITY::AVAILABLE;

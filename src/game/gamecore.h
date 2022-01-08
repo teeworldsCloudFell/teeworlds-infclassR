@@ -5,13 +5,11 @@
 
 #include <base/system.h>
 #include <base/math.h>
-#include <base/vmath.h>
 
 #include <math.h>
+#include "collision.h"
 #include <engine/shared/protocol.h>
 #include <game/generated/protocol.h>
-
-class CCollision;
 
 class CTuneParam
 {
@@ -256,12 +254,9 @@ public:
 	void Read(const CNetObj_CharacterCore *pObjCore);
 	void Write(CNetObj_CharacterCore *pObjCore);
 	void Quantize();
-	bool IsRecursePassenger(CCharacterCore *pMaybePassenger) const;
+	bool IsChildCharacter(CCharacterCore *suspect, CCharacterCore *me);
 	void SetPassenger(CCharacterCore *pPassenger);
 	void EnableJump();
-
-protected:
-	void UpdateTaxiPassengers();
 };
 
 //input count

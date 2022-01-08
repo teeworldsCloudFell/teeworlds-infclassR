@@ -4,7 +4,6 @@
 #include <game/mapitems.h>
 
 #include <game/generated/protocol.h>
-#include <game/server/player.h>
 
 #include "gamecontroller.h"
 #include "gamecontext.h"
@@ -48,19 +47,6 @@ void IGameController::DoActivityCheck()
 	if(g_Config.m_SvInactiveKickTime == 0)
 		return;
 
-	unsigned int nbPlayers=0;
-	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
-	while(Iter.Next())
-	{
-		nbPlayers++;
-	}
-
-	if(nbPlayers < 2)
-	{
-		// Do not kick players when they are the only (non-spectating) player
-		return;
-	}
-
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{
 #ifdef CONF_DEBUG
@@ -70,7 +56,7 @@ void IGameController::DoActivityCheck()
 				break;
 		}
 #endif
-		if(GameServer()->m_apPlayers[i] && GameServer()->m_apPlayers[i]->GetTeam() != TEAM_SPECTATORS && (Server()->GetAuthedState(i) == IServer::AUTHED_NO))
+		if(GameServer()->m_apPlayers[i] && GameServer()->m_apPlayers[i]->GetTeam() != TEAM_SPECTATORS && !Server()->IsAuthed(i))
 		{
 			if(Server()->Tick() > GameServer()->m_apPlayers[i]->m_LastActionTick + g_Config.m_SvInactiveKickTime * Server()->TickSpeed() * 60)
 			{
@@ -138,6 +124,10 @@ bool IGameController::OnEntity(const char* pName, vec2 Pivot, vec2 P0, vec2 P1, 
 		m_SpawnPoints[1].add(Pos);
 	
 	return false;
+}
+
+void IGameController::HandleCharacterTiles(CCharacter *pChr)
+{
 }
 
 double IGameController::GetTime()
@@ -589,6 +579,13 @@ void IGameController::Tick()
 			m_ForceBalanced = true;
 		}
 		m_UnbalancedTick = -1;
+	}
+
+	unsigned int nbPlayers=0;
+	CPlayerIterator<PLAYERITER_INGAME> Iter(GameServer()->m_apPlayers);
+	while(Iter.Next())
+	{
+		nbPlayers++;
 	}
 
 	DoActivityCheck();

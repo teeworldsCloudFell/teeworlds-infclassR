@@ -51,8 +51,6 @@
 	#include <windows.h>
 #endif
 
-extern const char *GIT_SHORTREV_HASH;
-
 static const char *StrLtrim(const char *pStr)
 {
 	while(*pStr && *pStr >= 0 && *pStr <= 32)
@@ -560,7 +558,6 @@ int CServer::Init()
 		
 /* INFECTION MODIFICATION START ***************************************/
 	m_aPreviousMap[0] = 0;
-	m_aCurrentMap[0] = 0;
 
 	SetFireDelay(INFWEAPON_NONE, 0);
 	SetFireDelay(INFWEAPON_HAMMER, 125);
@@ -589,6 +586,8 @@ int CServer::Init()
 	SetFireDelay(INFWEAPON_MERCENARY_GRENADE, GetFireDelay(INFWEAPON_GRENADE));
 	SetFireDelay(INFWEAPON_MERCENARY_GUN, 50);
 	SetFireDelay(INFWEAPON_MERCENARY_LASER, 250);
+	SetFireDelay(INFWEAPON_WITCH_PORTAL_LASER, GetFireDelay(INFWEAPON_LASER));
+	SetFireDelay(INFWEAPON_ROCKET, 400);
 	
 	SetAmmoRegenTime(INFWEAPON_NONE, 0);
 	SetAmmoRegenTime(INFWEAPON_HAMMER, 0);
@@ -618,6 +617,8 @@ int CServer::Init()
 	SetAmmoRegenTime(INFWEAPON_BIOLOGIST_SHOTGUN, 675);
 	SetAmmoRegenTime(INFWEAPON_LOOPER_LASER, 500);
 	SetAmmoRegenTime(INFWEAPON_LOOPER_GRENADE, 5000);
+	SetAmmoRegenTime(INFWEAPON_WITCH_PORTAL_LASER, 5000);
+	SetAmmoRegenTime(INFWEAPON_ROCKET, 7000);
 	
 	SetMaxAmmo(INFWEAPON_NONE, -1);
 	SetMaxAmmo(INFWEAPON_HAMMER, -1);
@@ -646,6 +647,8 @@ int CServer::Init()
 	SetMaxAmmo(INFWEAPON_BIOLOGIST_SHOTGUN, 10);
 	SetMaxAmmo(INFWEAPON_LOOPER_LASER, 20);
 	SetMaxAmmo(INFWEAPON_LOOPER_GRENADE, 10);
+	SetMaxAmmo(INFWEAPON_WITCH_PORTAL_LASER, 2);
+	SetMaxAmmo(INFWEAPON_ROCKET, 8);
 	
 	SetClassAvailability(PLAYERCLASS_ENGINEER, 2);
 	SetClassAvailability(PLAYERCLASS_SOLDIER, 2);
@@ -681,7 +684,7 @@ void CServer::SetRconCID(int ClientID)
 	m_RconClientID = ClientID;
 }
 
-int CServer::GetAuthedState(int ClientID) const
+bool CServer::IsAuthed(int ClientID) const
 {
 	return m_aClients[ClientID].m_Authed;
 }
@@ -775,7 +778,7 @@ int CServer::SendMsgEx(CMsgPacker *pMsg, int Flags, int ClientID, bool System)
 		return -1;
 
 	// drop packet to dummy client
-	if(ClientID >= 0 && ClientID < MAX_CLIENTS && GameServer()->IsClientBot(ClientID))
+	if(0 <= ClientID && ClientID < MAX_CLIENTS && GameServer()->IsClientBot(ClientID))
 		return 0;
 
 	mem_zero(&Packet, sizeof(CNetChunk));
@@ -794,30 +797,26 @@ int CServer::SendMsgEx(CMsgPacker *pMsg, int Flags, int ClientID, bool System)
 	if(Flags&MSGFLAG_FLUSH)
 		Packet.m_Flags |= NETSENDFLAG_FLUSH;
 
-	if(ClientID < 0)
-	{
-		// write message to demo recorder
-		if(!(Flags&MSGFLAG_NORECORD))
-			m_DemoRecorder.RecordMessage(pMsg->Data(), pMsg->Size());
+	// write message to demo recorder
+	if(!(Flags&MSGFLAG_NORECORD))
+		m_DemoRecorder.RecordMessage(pMsg->Data(), pMsg->Size());
 
-		if(!(Flags & MSGFLAG_NOSEND))
+	if(!(Flags&MSGFLAG_NOSEND))
+	{
+		if(ClientID == -1)
 		{
-			for(int i = 0; i < MAX_CLIENTS; i++)
-			{
+			// broadcast
+			int i;
+			for(i = 0; i < MAX_CLIENTS; i++)
 				if(m_aClients[i].m_State == CClient::STATE_INGAME)
 				{
 					Packet.m_ClientID = i;
 					m_NetServer.Send(&Packet);
 				}
-			}
 		}
-	}
-	else
-	{
-		if(!(Flags & MSGFLAG_NOSEND))
+		else
 			m_NetServer.Send(&Packet);
 	}
-
 	return 0;
 }
 
@@ -1095,35 +1094,35 @@ void CServer::SendMap(int ClientID)
 
 void CServer::SendMapData(int ClientID, int Chunk)
 {
-	unsigned int ChunkSize = 1024-128;
-	unsigned int Offset = Chunk * ChunkSize;
-	int Last = 0;
-
-	// drop faulty map data requests
-	if(Chunk < 0 || Offset > m_CurrentMapSize)
-		return;
-
-	if(Offset+ChunkSize >= m_CurrentMapSize)
-	{
-		ChunkSize = m_CurrentMapSize-Offset;
-		Last = 1;
-	}
-
-	CMsgPacker Msg(NETMSG_MAP_DATA);
-	Msg.AddInt(Last);
-	Msg.AddInt(m_CurrentMapCrc);
-	Msg.AddInt(Chunk);
-	Msg.AddInt(ChunkSize);
-	Msg.AddRaw(&m_pCurrentMapData[Offset], ChunkSize);
-	SendMsgEx(&Msg, MSGFLAG_VITAL|MSGFLAG_FLUSH, ClientID, true);
-
-	if(g_Config.m_Debug)
-	{
-		char aBuf[256];
-		str_format(aBuf, sizeof(aBuf), "sending chunk %d with size %d", Chunk, ChunkSize);
-		Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "server", aBuf);
-	}
-}
+ 	unsigned int ChunkSize = 1024-128;
+ 	unsigned int Offset = Chunk * ChunkSize;
+ 	int Last = 0;
+ 
+ 	// drop faulty map data requests
+ 	if(Chunk < 0 || Offset > m_CurrentMapSize)
+ 		return;
+ 
+ 	if(Offset+ChunkSize >= m_CurrentMapSize)
+ 	{
+ 		ChunkSize = m_CurrentMapSize-Offset;
+ 		Last = 1;
+ 	}
+ 
+ 	CMsgPacker Msg(NETMSG_MAP_DATA);
+ 	Msg.AddInt(Last);
+ 	Msg.AddInt(m_CurrentMapCrc);
+ 	Msg.AddInt(Chunk);
+ 	Msg.AddInt(ChunkSize);
+ 	Msg.AddRaw(&m_pCurrentMapData[Offset], ChunkSize);
+ 	SendMsgEx(&Msg, MSGFLAG_VITAL|MSGFLAG_FLUSH, ClientID, true);
+ 
+ 	if(g_Config.m_Debug)
+ 	{
+ 		char aBuf[256];
+ 		str_format(aBuf, sizeof(aBuf), "sending chunk %d with size %d", Chunk, ChunkSize);
+ 		Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "server", aBuf);
+ 	}
+ }
 
 void CServer::SendConnectionReady(int ClientID)
 {
@@ -1365,7 +1364,7 @@ void CServer::ProcessClientPacket(CNetChunk *pPacket)
 				net_addr_str(m_NetServer.ClientAddr(ClientID), aAddrStr, sizeof(aAddrStr), true);
 
 				char aBuf[256];
-				str_format(aBuf, sizeof(aBuf), "player is ready. ClientID=%d addr=%s secure=%s", ClientID, aAddrStr, m_NetServer.HasSecurityToken(ClientID)?"yes":"no");
+				str_format(aBuf, sizeof(aBuf), "player is ready. ClientID=%x addr=%s secure=%s", ClientID, aAddrStr, m_NetServer.HasSecurityToken(ClientID)?"yes":"no");
 				Console()->Print(IConsole::OUTPUT_LEVEL_ADDINFO, "server", aBuf);
 				m_aClients[ClientID].m_State = CClient::STATE_READY;
 				m_aClients[ClientID].m_WaitingTime = TickSpeed()*g_Config.m_InfConWaitingTime;
@@ -1379,7 +1378,7 @@ void CServer::ProcessClientPacket(CNetChunk *pPacket)
 				net_addr_str(m_NetServer.ClientAddr(ClientID), aAddrStr, sizeof(aAddrStr), true);
 
 				char aBuf[256];
-				str_format(aBuf, sizeof(aBuf), "player has entered the game. ClientID=%d addr=%s", ClientID, aAddrStr);
+				str_format(aBuf, sizeof(aBuf), "player has entered the game. ClientID=%x addr=%s", ClientID, aAddrStr);
 				Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
 				m_aClients[ClientID].m_State = CClient::STATE_INGAME;
 				
@@ -1604,7 +1603,7 @@ void CServer::ProcessClientPacket(CNetChunk *pPacket)
 	}
 }
 
-void CServer::SendServerInfoConnless(const NETADDR *pAddr, int Token, int Type)
+void CServer::SendServerInfoConnless(const NETADDR *pAddr, int Token, bool Extended)
 {
 	const int MaxRequests = g_Config.m_SvServerInfoPerSecond;
 	int64 Now = Tick();
@@ -1627,16 +1626,14 @@ void CServer::SendServerInfoConnless(const NETADDR *pAddr, int Token, int Type)
 		str_format(aBuf, sizeof(aBuf), "Too many info requests from %s: %d > %d (Now = %lld, mSIFR = %lld)",
 				aAddrStr, m_ServerInfoNumRequests, MaxRequests, Now, m_ServerInfoFirstRequest);
 		Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "inforequests", aBuf);
-		return;
+	} else {
+		SendServerInfo(pAddr, Token, Extended, true);
 	}
-
-	bool SendClients = m_ServerInfoNumRequests <= MaxRequests && !m_ServerInfoHighLoad;
-	SendServerInfo(pAddr, Token, Type, SendClients);
 }
 
-void CServer::SendServerInfo(const NETADDR *pAddr, int Token, int Type, bool SendClients)
+void CServer::SendServerInfo(const NETADDR *pAddr, int Token, bool Extended, bool SendClients, int Offset)
 {
-	// One chance to improve the protocol!
+	CNetChunk Packet;
 	CPacker p;
 	char aBuf[256];
 
@@ -1646,9 +1643,6 @@ void CServer::SendServerInfo(const NETADDR *pAddr, int Token, int Type, bool Sen
 	{
 		if(m_aClients[i].m_State != CClient::STATE_EMPTY)
 		{
-			if(GameServer()->IsClientBot(i))
-				continue;
-
 			if(GameServer()->IsClientPlayer(i))
 				PlayerCount++;
 
@@ -1658,19 +1652,9 @@ void CServer::SendServerInfo(const NETADDR *pAddr, int Token, int Type, bool Sen
 
 	p.Reset();
 
-	#define ADD_RAW(p, x) (p).AddRaw(x, sizeof(x))
-	#define ADD_INT(p, x) do { str_format(aBuf, sizeof(aBuf), "%d", x); (p).AddString(aBuf, 0); } while(0)
-
-	switch(Type)
-	{
-	case SERVERINFO_EXTENDED: ADD_RAW(p, SERVERBROWSE_INFO_EXTENDED); break;
-	case SERVERINFO_64_LEGACY: ADD_RAW(p, SERVERBROWSE_INFO_64_LEGACY); break;
-	case SERVERINFO_VANILLA: ADD_RAW(p, SERVERBROWSE_INFO); break;
-	case SERVERINFO_INGAME: ADD_RAW(p, SERVERBROWSE_INFO); break;
-	default: dbg_assert(false, "unknown serverinfo type");
-	}
-
-	ADD_INT(p, Token);
+	p.AddRaw(Extended?SERVERBROWSE_INFO64:SERVERBROWSE_INFO, sizeof(Extended?SERVERBROWSE_INFO64:SERVERBROWSE_INFO));
+	str_format(aBuf, sizeof(aBuf), "%d", Token);
+	p.AddString(aBuf, 6);
 
 	p.AddString(GameServer()->Version(), 32);
 	
@@ -1729,193 +1713,121 @@ void CServer::SendServerInfo(const NETADDR *pAddr, int Token, int Type, bool Sen
 	const char *pMapName = GetMapName();
 	if(g_Config.m_SvHideInfo)
 	{
-		// Full hide
-		ClientCount = 0;
-		PlayerCount = 0;
-		SendClients = false;
-		pMapName = "";
-	}
-	else if (g_Config.m_SvInfoMaxClients >= 0)
-	{
-		ClientCount = minimum(ClientCount, g_Config.m_SvInfoMaxClients);
-		PlayerCount = minimum(ClientCount, PlayerCount);
-	}
-
-	if(Type != SERVERINFO_VANILLA)
-	{
-		p.AddString(aBuf, 256);
-	}
-	else
-	{
-		if(m_NetServer.MaxClients() <= VANILLA_MAX_CLIENTS)
+		if(g_Config.m_SvHideInfo == 2)
 		{
-			p.AddString(aBuf, 64);
+			// Full hide
+			PlayerCount = 0;
+			ClientCount = 0;
+			SendClients = false;
+			pMapName = "";
 		}
 		else
 		{
-			str_format(aBuf, sizeof(aBuf), "%s [%d/%d]", aBuf, ClientCount, m_NetServer.MaxClients());
-			p.AddString(aBuf, 64);
+			// Limit players
+			static const int SoftLimit = 8;
+			static const int HardLimit = 12;
+			if(PlayerCount > SoftLimit)
+			{
+				PlayerCount = SoftLimit + (PlayerCount - SoftLimit) / 3;
+			}
+			PlayerCount = minimum(PlayerCount, HardLimit);
+			ClientCount = minimum(ClientCount, PlayerCount);
 		}
 	}
-	p.AddString(pMapName, 32);
 
-	if(Type == SERVERINFO_EXTENDED)
+	if (Extended)
 	{
-		ADD_INT(p, m_CurrentMapCrc);
-		ADD_INT(p, m_CurrentMapSize);
+			p.AddString(aBuf, 256);
 	}
+	else
+	{
+		if (ClientCount < VANILLA_MAX_CLIENTS)
+			p.AddString(aBuf, 64);
+		else
+		{
+		   char bBuf[64];
+		   str_format(bBuf, sizeof(bBuf), "%s - %d/%d online", aBuf, ClientCount, m_NetServer.MaxClients());
+		   p.AddString(bBuf, 64);
+		}
+	}
+
+	p.AddString(pMapName, 32);
 
 	// gametype
 	p.AddString(GameServer()->GameType(), 16);
 
 	// flags
-	ADD_INT(p, g_Config.m_Password[0] ? SERVER_FLAG_PASSWORD : 0);
+	int i = 0;
+	if(g_Config.m_Password[0]) // password set
+		i |= SERVER_FLAG_PASSWORD;
+	str_format(aBuf, sizeof(aBuf), "%d", i);
+	p.AddString(aBuf, 2);
 
 	int MaxClients = m_NetServer.MaxClients();
-	if(Type == SERVERINFO_VANILLA || Type == SERVERINFO_INGAME)
+	if (!Extended)
 	{
-		if(ClientCount >= VANILLA_MAX_CLIENTS)
+		if (ClientCount >= VANILLA_MAX_CLIENTS)
 		{
-			if(ClientCount < MaxClients)
+			if (ClientCount < MaxClients)
 				ClientCount = VANILLA_MAX_CLIENTS - 1;
 			else
 				ClientCount = VANILLA_MAX_CLIENTS;
 		}
-		if(MaxClients > VANILLA_MAX_CLIENTS)
-			MaxClients = VANILLA_MAX_CLIENTS;
-		if(PlayerCount > ClientCount)
-			PlayerCount = ClientCount;
+		if (MaxClients > VANILLA_MAX_CLIENTS) MaxClients = VANILLA_MAX_CLIENTS;
 	}
 
-	ADD_INT(p, PlayerCount); // num players
-	ADD_INT(p, MaxClients-g_Config.m_SvSpectatorSlots); // max players
-	ADD_INT(p, ClientCount); // num clients
-	ADD_INT(p, MaxClients); // max clients
+	if (PlayerCount > ClientCount)
+		PlayerCount = ClientCount;
 
-	if(Type == SERVERINFO_EXTENDED)
-		p.AddString("", 0); // extra info, reserved
+	str_format(aBuf, sizeof(aBuf), "%d", PlayerCount); p.AddString(aBuf, 3); // num players
+	str_format(aBuf, sizeof(aBuf), "%d", MaxClients-g_Config.m_SvSpectatorSlots); p.AddString(aBuf, 3); // max players
+	str_format(aBuf, sizeof(aBuf), "%d", ClientCount); p.AddString(aBuf, 3); // num clients
+	str_format(aBuf, sizeof(aBuf), "%d", MaxClients); p.AddString(aBuf, 3); // max clients
 
-	const void *pPrefix = p.Data();
-	int PrefixSize = p.Size();
+	if (Extended)
+		p.AddInt(Offset);
 
-	CPacker pp;
-	CNetChunk Packet;
-	int PacketsSent = 0;
-	int PlayersSent = 0;
-	Packet.m_ClientID = -1;
-	Packet.m_Address = *pAddr;
-	Packet.m_Flags = NETSENDFLAG_CONNLESS;
+	int ClientsPerPacket = Extended ? 24 : VANILLA_MAX_CLIENTS;
+	int Skip = Offset;
+	int Take = ClientsPerPacket;
 
-	#define SEND(size) \
-		do \
-		{ \
-			Packet.m_pData = pp.Data(); \
-			Packet.m_DataSize = size; \
-			m_NetServer.Send(&Packet); \
-			PacketsSent++; \
-		} while(0)
-
-	#define RESET() \
-		do \
-		{ \
-			pp.Reset(); \
-			pp.AddRaw(pPrefix, PrefixSize); \
-		} while(0)
-
-	RESET();
-
-	if(Type == SERVERINFO_64_LEGACY)
-		pp.AddInt(PlayersSent); // offset
-
-	if(!SendClients)
-	{
-		SEND(pp.Size());
-		return;
-	}
-
-	if(Type == SERVERINFO_EXTENDED)
-	{
-		pPrefix = SERVERBROWSE_INFO_EXTENDED_MORE;
-		PrefixSize = sizeof(SERVERBROWSE_INFO_EXTENDED_MORE);
-	}
-
-	int Remaining;
-	switch(Type)
-	{
-	case SERVERINFO_EXTENDED: Remaining = -1; break;
-	case SERVERINFO_64_LEGACY: Remaining = 24; break;
-	case SERVERINFO_VANILLA: Remaining = VANILLA_MAX_CLIENTS; break;
-	case SERVERINFO_INGAME: Remaining = VANILLA_MAX_CLIENTS; break;
-	default: dbg_assert(0, "caught earlier, unreachable"); return;
-	}
-
-	// Use the following strategy for sending:
-	// For vanilla, send the first 16 players.
-	// For legacy 64p, send 24 players per packet.
-	// For extended, send as much players as possible.
-
-	for(int i = 0; i < MAX_CLIENTS; i++)
-	{
-		if(m_aClients[i].m_State != CClient::STATE_EMPTY)
+	if (SendClients) {
+		for(i = 0; i < MAX_CLIENTS; i++)
 		{
-			if(GameServer()->IsClientBot(i))
-				continue;
-
-			if(ClientCount == 0)
-				break;
-
-			--ClientCount;
-
-			if(Remaining == 0)
+			if(m_aClients[i].m_State != CClient::STATE_EMPTY)
 			{
-				if(Type == SERVERINFO_VANILLA || Type == SERVERINFO_INGAME)
+				if(g_Config.m_SvHideInfo)
+				{
+					if(PlayerCount == 0)
+						break;
+
+					--PlayerCount;
+				}
+
+				if (Skip-- > 0)
+					continue;
+				if (--Take < 0)
 					break;
 
-				// Otherwise we're SERVERINFO_64_LEGACY.
-				SEND(pp.Size());
-				RESET();
-				pp.AddInt(PlayersSent); // offset
-				Remaining = 24;
+				p.AddString(ClientName(i), MAX_NAME_LENGTH); // client name
+				p.AddString(ClientClan(i), MAX_CLAN_LENGTH); // client clan
+
+				str_format(aBuf, sizeof(aBuf), "%d", m_aClients[i].m_Country); p.AddString(aBuf, 6); // client country
+				str_format(aBuf, sizeof(aBuf), "%d", RoundStatistics()->PlayerScore(i)); p.AddString(aBuf, 6); // client score
+				str_format(aBuf, sizeof(aBuf), "%d", GameServer()->IsClientPlayer(i)?1:0); p.AddString(aBuf, 2); // is player?
 			}
-			if(Remaining > 0)
-			{
-				Remaining--;
-			}
-
-			int PreviousSize = pp.Size();
-
-			pp.AddString(ClientName(i), MAX_NAME_LENGTH); // client name
-			pp.AddString(ClientClan(i), MAX_CLAN_LENGTH); // client clan
-
-			ADD_INT(pp, m_aClients[i].m_Country); // client country
-			ADD_INT(pp, RoundStatistics()->PlayerScore(i)); // client score
-			ADD_INT(pp, GameServer()->IsClientPlayer(i) ? 1 : 0); // is player?
-			if(Type == SERVERINFO_EXTENDED)
-				pp.AddString("", 0); // extra info, reserved
-
-			if(Type == SERVERINFO_EXTENDED)
-			{
-				if(pp.Size() >= NET_MAX_PAYLOAD)
-				{
-					// Retry current player.
-					i--;
-					SEND(PreviousSize);
-					RESET();
-					ADD_INT(pp, Token);
-					ADD_INT(pp, PacketsSent);
-					pp.AddString("", 0); // extra info, reserved
-					continue;
-				}
-			}
-			PlayersSent++;
 		}
 	}
 
-	SEND(pp.Size());
-	#undef SEND
-	#undef RESET
-	#undef ADD_RAW
-	#undef ADD_INT
+	Packet.m_ClientID = -1;
+	Packet.m_Address = *pAddr;
+	Packet.m_Flags = NETSENDFLAG_CONNLESS;
+	Packet.m_DataSize = p.Size();
+	Packet.m_pData = p.Data();
+	m_NetServer.Send(&Packet);
+
+	if (Extended && Take < 0)
+		SendServerInfo(pAddr, Token, Extended, SendClients, Offset + ClientsPerPacket);
 }
 
 void CServer::UpdateServerInfo()
@@ -1923,11 +1835,10 @@ void CServer::UpdateServerInfo()
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{
 		if(m_aClients[i].m_State != CClient::STATE_EMPTY)
-		{
-			SendServerInfo(m_NetServer.ClientAddr(i), -1, SERVERINFO_INGAME, false);
-		}
+			SendServerInfo(m_NetServer.ClientAddr(i), -1);
 	}
 }
+
 
 void CServer::PumpNetwork()
 {
@@ -1943,29 +1854,15 @@ void CServer::PumpNetwork()
 			// stateless
 			if(!m_Register.RegisterProcessPacket(&Packet))
 			{
-				int ExtraToken = 0;
-				int Type = -1;
-				if(Packet.m_DataSize >= (int)sizeof(SERVERBROWSE_GETINFO)+1 &&
+				if(Packet.m_DataSize == sizeof(SERVERBROWSE_GETINFO)+1 &&
 					mem_comp(Packet.m_pData, SERVERBROWSE_GETINFO, sizeof(SERVERBROWSE_GETINFO)) == 0)
 				{
-					if(Packet.m_Flags&NETSENDFLAG_EXTENDED)
-					{
-						Type = SERVERINFO_EXTENDED;
-						ExtraToken = (Packet.m_aExtraData[0] << 8) | Packet.m_aExtraData[1];
-					}
-					else
-						Type = SERVERINFO_VANILLA;
+					SendServerInfoConnless(&Packet.m_Address, ((unsigned char *)Packet.m_pData)[sizeof(SERVERBROWSE_GETINFO)]);
 				}
-				else if(Packet.m_DataSize >= (int)sizeof(SERVERBROWSE_GETINFO_64_LEGACY)+1 &&
-					mem_comp(Packet.m_pData, SERVERBROWSE_GETINFO_64_LEGACY, sizeof(SERVERBROWSE_GETINFO_64_LEGACY)) == 0)
+				else if(Packet.m_DataSize == sizeof(SERVERBROWSE_GETINFO64)+1 &&
+					mem_comp(Packet.m_pData, SERVERBROWSE_GETINFO64, sizeof(SERVERBROWSE_GETINFO64)) == 0)
 				{
-					Type = SERVERINFO_64_LEGACY;
-				}
-				if(Type != -1)
-				{
-					int Token = ((unsigned char *)Packet.m_pData)[sizeof(SERVERBROWSE_GETINFO)];
-					Token |= ExtraToken << 8;
-					SendServerInfoConnless(&Packet.m_Address, Token, Type);
+					SendServerInfoConnless(&Packet.m_Address, ((unsigned char *)Packet.m_pData)[sizeof(SERVERBROWSE_GETINFO64)], true);
 				}
 			}
 		}
@@ -2182,15 +2079,6 @@ int CServer::Run()
 	GameServer()->OnInit();
 	str_format(aBuf, sizeof(aBuf), "version %s", GameServer()->NetVersion());
 	Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
-	str_format(aBuf, sizeof(aBuf), "game version %s", GameServer()->Version());
-	Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
-
-	if(GIT_SHORTREV_HASH)
-	{
-		char aBuf[64];
-		str_format(aBuf, sizeof(aBuf), "Git revision hash: %s", GIT_SHORTREV_HASH);
-		Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", aBuf);
-	}
 
 	// process pending commands
 	m_pConsole->StoreCommands(false);
@@ -2205,7 +2093,6 @@ int CServer::Run()
 
 		while(m_RunServer)
 		{
-			set_new_tick();
 			int64 t = time_get();
 			int NewTicks = 0;
 			
@@ -2244,7 +2131,6 @@ int CServer::Run()
 
 					m_GameStartTime = time_get();
 					m_CurrentGameTick = 0;
-					m_ServerInfoFirstRequest = 0;
 					Kernel()->ReregisterInterface(GameServer());
 					GameServer()->OnInit();
 					UpdateServerInfo();
@@ -2387,16 +2273,10 @@ int CServer::Run()
 				if(g_Config.m_SvShutdownWhenEmpty)
 					m_RunServer = false;
 				else
-					net_socket_read_wait(m_NetServer.Socket(), 1000000);
+					net_socket_read_wait(m_NetServer.Socket(), 1000);
 			}
 			else
-			{
-				set_new_tick();
-				int64 t = time_get();
-				int x = TickStartTime(m_CurrentGameTick+1) - t + 1;
-				if(x > 0)
-					net_socket_read_wait(m_NetServer.Socket(), x);
-			}
+				net_socket_read_wait(m_NetServer.Socket(), 5);
 		}
 	}
 	// disconnect all clients on shutdown
@@ -2564,11 +2444,6 @@ bool CServer::ConOptionStatus(IConsole::IResult *pResult, void *pUser)
 
 bool CServer::ConStatusExtended(IConsole::IResult *pResult, void *pUser)
 {
-	return ConStatus(pResult, pUser);
-}
-
-bool CServer::ConStatus(IConsole::IResult *pResult, void *pUser)
-{
 	char aBuf[1024];
 	char aAddrStr[NETADDR_MAXSTRSIZE];
 	CServer* pThis = static_cast<CServer *>(pUser);
@@ -2599,6 +2474,49 @@ bool CServer::ConStatus(IConsole::IResult *pResult, void *pUser)
 					AuthLevel,
 					aAddrStr,
 					pThis->GameServer()->GetClientVersion(i)
+				);
+			}
+			else
+				str_format(aBuf, sizeof(aBuf), "id=%d addr=%s connecting", i, aAddrStr);
+			pThis->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "Server", aBuf);
+		}
+	}
+	
+	return true;
+/* INFECTION MODIFICATION END *****************************************/
+}
+
+bool CServer::ConStatus(IConsole::IResult *pResult, void *pUser)
+{
+	char aBuf[1024];
+	char aAddrStr[NETADDR_MAXSTRSIZE];
+	CServer* pThis = static_cast<CServer *>(pUser);
+
+/* INFECTION MODIFICATION START ***************************************/
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if(pThis->m_aClients[i].m_State != CClient::STATE_EMPTY)
+		{
+			net_addr_str(pThis->m_NetServer.ClientAddr(i), aAddrStr, sizeof(aAddrStr), true);
+			if(pThis->m_aClients[i].m_State == CClient::STATE_INGAME)
+			{				
+				//Add some padding to make the command more readable
+				char aBufName[18];
+				str_copy(aBufName, pThis->ClientName(i), sizeof(aBufName));
+				for(int c=str_length(aBufName); c<((int)sizeof(aBufName))-1; c++)
+					aBufName[c] = ' ';
+				aBufName[sizeof(aBufName)-1] = 0;
+				
+				int AuthLevel = pThis->m_aClients[i].m_Authed == CServer::AUTHED_ADMIN ? 2 :
+										pThis->m_aClients[i].m_Authed == CServer::AUTHED_MOD ? 1 : 0;
+				
+				str_format(aBuf, sizeof(aBuf), "(#%02i) %s: [antispoof=%d] [login=%d] [level=%d] [ip=%s]",
+					i,
+					aBufName,
+					pThis->m_NetServer.HasSecurityToken(i),
+					pThis->IsClientLogged(i),
+					AuthLevel,
+					aAddrStr
 				);
 			}
 			else
@@ -3135,7 +3053,6 @@ int CServer::GetClientAntiPing(int ClientID)
 
 void CServer::SetClientAntiPing(int ClientID, int Value)
 {
-	dbg_msg("server", "set_antiping ClientID=%d antiping=%d", ClientID, Value);
 	m_aClients[ClientID].m_AntiPing = Value;
 }
 
@@ -3176,7 +3093,6 @@ const char* CServer::GetClientLanguage(int ClientID)
 
 void CServer::SetClientLanguage(int ClientID, const char* pLanguage)
 {
-	dbg_msg("server", "set_language ClientID=%d lang=%s", ClientID, pLanguage);
 	str_copy(m_aClients[ClientID].m_aLanguage, pLanguage, sizeof(m_aClients[ClientID].m_aLanguage));
 }
 	
@@ -3230,6 +3146,36 @@ int CServer::IsClassChooserEnabled()
 	return m_InfClassChooser;
 }
 
+bool CServer::GetPlayerClassEnabled(int PlayerClass) const
+{
+	switch (PlayerClass)
+	{
+		case PLAYERCLASS_MERCENARY:
+			return g_Config.m_InfEnableMercenary;
+		case PLAYERCLASS_MEDIC:
+			return g_Config.m_InfEnableMedic;
+		case PLAYERCLASS_HERO:
+			return g_Config.m_InfEnableHero;
+		case PLAYERCLASS_ENGINEER:
+			return g_Config.m_InfEnableEngineer;
+		case PLAYERCLASS_SOLDIER:
+			return g_Config.m_InfEnableSoldier;
+		case PLAYERCLASS_NINJA:
+			return g_Config.m_InfEnableNinja;
+		case PLAYERCLASS_SNIPER:
+			return g_Config.m_InfEnableSniper;
+		case PLAYERCLASS_SCIENTIST:
+			return g_Config.m_InfEnableScientist;
+		case PLAYERCLASS_BIOLOGIST:
+			return g_Config.m_InfEnableBiologist;
+		case PLAYERCLASS_LOOPER:
+			return g_Config.m_InfEnableLooper;
+		default:
+			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", "WARNING: Invalid GetPlayerClassEnabled() call");
+			return false;
+	}
+}
+
 void CServer::SetPlayerClassEnabled(int PlayerClass, bool Enabled)
 {
 	const int Value = Enabled ? 1 : 0;
@@ -3268,6 +3214,64 @@ void CServer::SetPlayerClassEnabled(int PlayerClass, bool Enabled)
 		default:
 			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", "WARNING: Invalid SetPlayerClassEnabled() call");
 			return;
+	}
+}
+
+int CServer::GetMinPlayersForClass(int PlayerClass) const
+{
+	switch (PlayerClass)
+	{
+		case PLAYERCLASS_ENGINEER:
+			return g_Config.m_InfMinPlayersForEngineer;
+		default:
+			return 0;
+	}
+}
+
+int CServer::GetClassPlayerLimit(int PlayerClass) const
+{
+	switch (PlayerClass)
+	{
+		case PLAYERCLASS_MEDIC:
+			return g_Config.m_InfMedicLimit;
+		case PLAYERCLASS_HERO:
+			return g_Config.m_InfHeroLimit;
+		case PLAYERCLASS_WITCH:
+			return g_Config.m_InfWitchLimit;
+		default:
+			return g_Config.m_SvMaxClients;
+	}
+}
+
+int CServer::GetPlayerClassProbability(int PlayerClass) const
+{
+	switch (PlayerClass)
+	{
+		case PLAYERCLASS_SMOKER:
+			return g_Config.m_InfProbaSmoker;
+		case PLAYERCLASS_BOOMER:
+			return g_Config.m_InfProbaBoomer;
+		case PLAYERCLASS_HUNTER:
+			return g_Config.m_InfProbaHunter;
+		case PLAYERCLASS_BAT:
+			return g_Config.m_InfProbaBat;
+		case PLAYERCLASS_GHOST:
+			return g_Config.m_InfProbaGhost;
+		case PLAYERCLASS_SPIDER:
+			return g_Config.m_InfProbaSpider;
+		case PLAYERCLASS_GHOUL:
+			return g_Config.m_InfProbaGhoul;
+		case PLAYERCLASS_SLUG:
+			return g_Config.m_InfProbaSlug;
+		case PLAYERCLASS_VOODOO:
+			return g_Config.m_InfProbaVoodoo;
+		case PLAYERCLASS_WITCH:
+			return g_Config.m_InfProbaWitch;
+		case PLAYERCLASS_UNDEAD:
+			return g_Config.m_InfProbaUndead;
+		default:
+			m_pConsole->Print(IConsole::OUTPUT_LEVEL_STANDARD, "server", "WARNING: Invalid GetPlayerClassProbability() call");
+			return false;
 	}
 }
 

@@ -3,11 +3,11 @@
 #ifndef GAME_SERVER_ENTITIES_ENGINEER_WALL_H
 #define GAME_SERVER_ENTITIES_ENGINEER_WALL_H
 
-#include "infc-placed-object.h"
+#include "infcentity.h"
 
 class CInfClassCharacter;
 
-class CEngineerWall : public CPlacedObject
+class CEngineerWall : public CInfCEntity
 {
 public:
 	CEngineerWall(CGameContext *pGameContext, vec2 Pos, vec2 Direction, int Owner);

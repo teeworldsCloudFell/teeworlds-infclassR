@@ -7,7 +7,7 @@
 #include <engine/shared/config.h>
 #include <engine/server/roundstatistics.h>
 #include <game/server/gamecontext.h>
-#include <game/server/player.h>
+#include <game/mapitems.h>
 #include <iostream>
 
 #include "character.h"
@@ -22,6 +22,7 @@
 #include <game/server/infclass/entities/medic-grenade.h>
 #include <game/server/infclass/entities/merc-bomb.h>
 #include <game/server/infclass/entities/plasma.h>
+#include <game/server/infclass/entities/portal.h>
 #include <game/server/infclass/entities/scatter-grenade.h>
 #include <game/server/infclass/entities/scientist-mine.h>
 #include <game/server/infclass/entities/slug-slime.h>
@@ -29,6 +30,7 @@
 #include <game/server/infclass/entities/superweapon-indicator.h>
 #include <game/server/infclass/entities/turret.h>
 #include <game/server/infclass/entities/white-hole.h>
+#include <game/server/infclass/infcgamecontroller.h>
 
 MACRO_ALLOC_POOL_ID_IMPL(CCharacter, MAX_CLIENTS)
 
@@ -61,6 +63,9 @@ m_pConsole(pConsole)
 	m_DartLifeSpan = -1;
 	m_IsInvisible = false;
 	m_InvisibleTick = 0;
+	m_PositionLockTick = -1;
+	m_PositionLocked = false;
+	m_PositionLockAvailable = false;
 	m_HealTick = 0;
 	m_InfZoneTick = -1;
 	m_InAirTick = 0;
@@ -74,6 +79,7 @@ m_pConsole(pConsole)
 	m_HasWhiteHole = false;
 	m_HasIndicator = false;
 	m_TurretCount = 0;
+	m_HasStunGrenade = false;
 	m_BroadcastWhiteHoleReady = -100;
 	m_pHeroFlag = nullptr;
 	m_ResetKillsTime = 0;
@@ -82,7 +88,7 @@ m_pConsole(pConsole)
 
 CCharacter::~CCharacter()
 {
-	FreeChildSnapIDs();
+	Destroy();
 }
 
 bool CCharacter::FindWitchSpawnPosition(vec2& Pos)
@@ -172,14 +178,45 @@ void CCharacter::Destroy()
 {	
 /* INFECTION MODIFICATION START ***************************************/
 	DestroyChildEntities();
-	FreeChildSnapIDs();
 	
-	if(m_pPlayer)
+	if (m_pPlayer)
 		m_pPlayer->ResetNumberKills();
+	
+	if(m_FlagID >= 0)
+	{
+		Server()->SnapFreeID(m_FlagID);
+		m_FlagID = -1;
+	}
+	if(m_HeartID >= 0)
+	{
+		Server()->SnapFreeID(m_HeartID);
+		m_HeartID = -1;
+	}
+	if(m_CursorID >= 0)
+	{
+		Server()->SnapFreeID(m_CursorID);
+		m_CursorID = -1;
+	}
+	
+	if(m_BarrierHintID >= 0)
+	{
+		Server()->SnapFreeID(m_BarrierHintID);
+		m_BarrierHintID = -1;
+	}
+	
+	if(m_BarrierHintIDs[0] >= 0)
+	{
+		for(int i=0; i<2; i++) 
+		{
+			Server()->SnapFreeID(m_BarrierHintIDs[i]);
+			m_BarrierHintIDs[i] = -1;
+		}
+
+	}
 	
 /* INFECTION MODIFICATION END *****************************************/
 
-	if(m_pPlayer)
+	if (m_pPlayer)
 		GameServer()->m_World.m_Core.m_apCharacters[m_pPlayer->GetCID()] = 0;
 	m_Alive = false;
 }
@@ -218,7 +255,7 @@ void CCharacter::HandleWaterJump()
 		if(m_Input.m_Jump && m_DartLifeSpan <= 0 && m_WaterJumpLifeSpan <=0)
 		{
 			m_WaterJumpLifeSpan = Server()->TickSpeed()/2;
-			m_DartLifeSpan = g_pData->m_Weapons.m_Ninja.m_Movetime * Server()->TickSpeed() / 1000;
+			m_DartLifeSpan =  g_pData->m_Weapons.m_Ninja.m_Movetime * Server()->TickSpeed() / 1000;
 			vec2 Direction = normalize(vec2(m_LatestInput.m_TargetX, m_LatestInput.m_TargetY));
 			m_DartDir = Direction;
 			m_DartOldVelAmount = length(m_Core.m_Vel);
@@ -254,13 +291,13 @@ void CCharacter::HandleNinja()
 
 	m_DartLifeSpan--;
 
-	if(m_DartLifeSpan == 0)
+	if (m_DartLifeSpan == 0)
 	{
 		// reset velocity
 		m_Core.m_Vel = m_DartDir*m_DartOldVelAmount;
 	}
 
-	if(m_DartLifeSpan > 0)
+	if (m_DartLifeSpan > 0)
 	{
 		// Set velocity
 		float VelocityBuff = 1.0f + static_cast<float>(m_NinjaVelocityBuff)/2.0f;
@@ -281,21 +318,21 @@ void CCharacter::HandleNinja()
 
 			for (int i = 0; i < Num; ++i)
 			{
-				if(aEnts[i] == this)
+				if (aEnts[i] == this)
 					continue;
 
 				// make sure we haven't Hit this object before
 				bool bAlreadyHit = false;
 				for (int j = 0; j < m_NumObjectsHit; j++)
 				{
-					if(m_apHitObjects[j] == aEnts[i])
+					if (m_apHitObjects[j] == aEnts[i])
 						bAlreadyHit = true;
 				}
-				if(bAlreadyHit)
+				if (bAlreadyHit)
 					continue;
 
 				// check so we are sufficiently close
-				if(distance(aEnts[i]->GetPos(), GetPos()) > (m_ProximityRadius * 2.0f))
+				if (distance(aEnts[i]->GetPos(), GetPos()) > (m_ProximityRadius * 2.0f))
 					continue;
 
 				// Hit a player, give him damage and stuffs...
@@ -304,7 +341,17 @@ void CCharacter::HandleNinja()
 				if(m_NumObjectsHit < 10)
 					m_apHitObjects[m_NumObjectsHit++] = aEnts[i];
 
-				aEnts[i]->TakeDamage(vec2(0, -10.0f), minimum(g_pData->m_Weapons.m_Ninja.m_pBase->m_Damage + m_NinjaStrengthBuff, 20), m_pPlayer->GetCID(), WEAPON_NINJA, TAKEDAMAGEMODE::NOINFECTION);
+				aEnts[i]->TakeDamage(vec2(0, -10.0f), minimum(g_pData->m_Weapons.m_Ninja.m_pBase->m_Damage + m_NinjaStrengthBuff, 20), m_pPlayer->GetCID(), WEAPON_NINJA, TAKEDAMAGEMODE_NOINFECTION);
+			}
+
+			const int Damage = minimum(g_pData->m_Weapons.m_Ninja.m_pBase->m_Damage + m_NinjaStrengthBuff, 20);
+			for(CPortal* pPortal = (CPortal*) GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_PORTAL); pPortal; pPortal = (CPortal*) pPortal->TypeNext())
+			{
+				// check so we are sufficiently close
+				if (distance(pPortal->GetPos(), GetPos()) > (m_ProximityRadius * 2.0f))
+					continue;
+
+				pPortal->TakeDamage(Damage, m_pPlayer->GetCID(), WEAPON_NINJA, TAKEDAMAGEMODE_NOINFECTION);
 			}
 		}
 	}
@@ -324,47 +371,140 @@ void CCharacter::DoWeaponSwitch()
 
 void CCharacter::HandleWeaponSwitch()
 {
-	int WantedWeapon = m_ActiveWeapon;
-	if(m_QueuedWeapon != -1)
-		WantedWeapon = m_QueuedWeapon;
-
 	// select Weapon
 	int Next = CountInput(m_LatestPrevInput.m_NextWeapon, m_LatestInput.m_NextWeapon).m_Presses;
 	int Prev = CountInput(m_LatestPrevInput.m_PrevWeapon, m_LatestInput.m_PrevWeapon).m_Presses;
 
-	if(Next < 128) // make sure we only try sane stuff
+	if(GetPlayerClass() == PLAYERCLASS_SPIDER)
 	{
-		while(Next) // Next Weapon selection
+		int WantedHookMode = m_HookMode;
+		
+		if(Next < 128) // make sure we only try sane stuff
 		{
-			WantedWeapon = (WantedWeapon+1)%NUM_WEAPONS;
-			if(m_aWeapons[WantedWeapon].m_Got)
+			while(Next) // Next Weapon selection
+			{
+				WantedHookMode = (WantedHookMode+1)%2;
 				Next--;
+			}
 		}
-	}
 
-	if(Prev < 128) // make sure we only try sane stuff
-	{
-		while(Prev) // Prev Weapon selection
+		if(Prev < 128) // make sure we only try sane stuff
 		{
-			WantedWeapon = (WantedWeapon-1)<0?NUM_WEAPONS-1:WantedWeapon-1;
-			if(m_aWeapons[WantedWeapon].m_Got)
+			while(Prev) // Prev Weapon selection
+			{
+				WantedHookMode = (WantedHookMode+2-1)%2;
 				Prev--;
+			}
 		}
+
+		// Direct Weapon selection
+		if(m_LatestInput.m_WantedWeapon)
+			WantedHookMode = m_Input.m_WantedWeapon-1;
+
+		if(WantedHookMode >= 0 && WantedHookMode < 2)
+			m_HookMode = WantedHookMode;
 	}
+	else
+	{
+		int WantedWeapon = m_ActiveWeapon;
+		if(m_QueuedWeapon != -1)
+			WantedWeapon = m_QueuedWeapon;
+		
+		if(Next < 128) // make sure we only try sane stuff
+		{
+			while(Next) // Next Weapon selection
+			{
+				WantedWeapon = (WantedWeapon+1)%NUM_WEAPONS;
+				if(m_aWeapons[WantedWeapon].m_Got)
+					Next--;
+			}
+		}
 
-	// Direct Weapon selection
-	if(m_LatestInput.m_WantedWeapon)
-		WantedWeapon = m_Input.m_WantedWeapon-1;
+		if(Prev < 128) // make sure we only try sane stuff
+		{
+			while(Prev) // Prev Weapon selection
+			{
+				WantedWeapon = (WantedWeapon-1)<0?NUM_WEAPONS-1:WantedWeapon-1;
+				if(m_aWeapons[WantedWeapon].m_Got)
+					Prev--;
+			}
+		}
 
-	// check for insane values
-	if(WantedWeapon >= 0 && WantedWeapon < NUM_WEAPONS && WantedWeapon != m_ActiveWeapon && m_aWeapons[WantedWeapon].m_Got)
-		m_QueuedWeapon = WantedWeapon;
+		// Direct Weapon selection
+		if(m_LatestInput.m_WantedWeapon)
+			WantedWeapon = m_Input.m_WantedWeapon-1;
 
-	DoWeaponSwitch();
+		// check for insane values
+		if(WantedWeapon >= 0 && WantedWeapon < NUM_WEAPONS && WantedWeapon != m_ActiveWeapon && m_aWeapons[WantedWeapon].m_Got)
+			m_QueuedWeapon = WantedWeapon;
+
+		DoWeaponSwitch();
+	}
 }
 
 void CCharacter::FireWeapon()
 {
+}
+
+bool CCharacter::HasPortal()
+{
+	return m_pPortalIn || m_pPortalOut;
+}
+
+void CCharacter::SaturateVelocity(vec2 Force, float MaxSpeed)
+{
+	if(length(Force) < 0.00001)
+		return;
+	
+	float Speed = length(m_Core.m_Vel);
+	vec2 VelDir = normalize(m_Core.m_Vel);
+	if(Speed < 0.00001)
+	{
+		VelDir = normalize(Force);
+	}
+	vec2 OrthoVelDir = vec2(-VelDir.y, VelDir.x);
+	float VelDirFactor = dot(Force, VelDir);
+	float OrthoVelDirFactor = dot(Force, OrthoVelDir);
+	
+	vec2 NewVel = m_Core.m_Vel;
+	if(Speed < MaxSpeed || VelDirFactor < 0.0f)
+	{
+		NewVel += VelDir*VelDirFactor;
+		float NewSpeed = length(NewVel);
+		if(NewSpeed > MaxSpeed)
+		{
+			if(VelDirFactor > 0.f)
+				NewVel = VelDir*MaxSpeed;
+			else
+				NewVel = -VelDir*MaxSpeed;
+		}
+	}
+	
+	NewVel += OrthoVelDir * OrthoVelDirFactor;
+	
+	m_Core.m_Vel = NewVel;
+}
+
+bool CCharacter::HasPassenger() const
+{
+	return m_Core.m_Passenger;
+}
+
+CCharacter *CCharacter::GetPassenger()
+{
+	if(!m_Core.m_Passenger)
+	{
+		return nullptr;
+	}
+
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		CCharacterCore *pCharCore = GameServer()->m_World.m_Core.m_apCharacters[i];
+		if (pCharCore == m_Core.m_Passenger)
+			return GameServer()->GetPlayerChar(i);
+	}
+
+	return nullptr;
 }
 
 void CCharacter::HandleWeapons()
@@ -387,6 +527,18 @@ void CCharacter::HandleWeapons()
 }
 
 /* INFECTION MODIFICATION START ***************************************/
+void CCharacter::RemoveAllGun()
+{
+	m_aWeapons[WEAPON_GUN].m_Got = false;
+	m_aWeapons[WEAPON_GUN].m_Ammo = 0;
+	m_aWeapons[WEAPON_LASER].m_Got = false;
+	m_aWeapons[WEAPON_LASER].m_Ammo = 0;
+	m_aWeapons[WEAPON_GRENADE].m_Got = false;
+	m_aWeapons[WEAPON_GRENADE].m_Ammo = 0;
+	m_aWeapons[WEAPON_SHOTGUN].m_Got = false;
+	m_aWeapons[WEAPON_SHOTGUN].m_Ammo = 0;
+}
+
 void CCharacter::SetAntiFire()
 {
 	m_AntiFireTime = Server()->TickSpeed() * Config()->m_InfAntiFireTime / 1000;
@@ -485,7 +637,7 @@ void CCharacter::ResetInput()
 void CCharacter::Tick()
 {
 	// set emote
-	if(m_EmoteStop < Server()->Tick())
+	if (m_EmoteStop < Server()->Tick())
 	{
 		m_EmoteType = m_pPlayer->GetDefaultEmote();
 		m_EmoteStop = -1;
@@ -504,6 +656,21 @@ void CCharacter::Tick()
 	//~ else
 		//~ m_InWater = 0;
 
+	if(IsHuman() && IsAlive() && GameServer()->m_pController->IsInfectionStarted())
+	{
+	}
+	else
+		m_BonusTick = 0;
+
+	GameServer()->m_pController->HandleCharacterTiles(this);
+
+	if(m_PositionLockTick > 0)
+	{
+		--m_PositionLockTick;
+		if(m_PositionLockTick <= 0)
+			m_PositionLocked = false;
+	}
+	
 	--m_FrozenTime;
 	if(m_IsFrozen)
 	{
@@ -546,8 +713,7 @@ void CCharacter::Tick()
 	if(m_SlipperyTick > 0)
 		--m_SlipperyTick;
 	
-	if(m_ProtectionTick > 0)
-	{
+	if(m_ProtectionTick > 0) {
 		--m_ProtectionTick;
 
 		// Player left spawn before protection ran out
@@ -557,6 +723,10 @@ void CCharacter::Tick()
 			m_ProtectionTick = 0;
 		}
 	}
+	
+	//NeedHeal
+	if(m_Armor >= 10)
+		m_NeedFullHeal = false;
 
 	//Ghost
 	if(GetPlayerClass() == PLAYERCLASS_GHOST)
@@ -695,15 +865,21 @@ void CCharacter::Tick()
 	}
 	CoreTickParams.m_HookMode = m_HookMode;
 	
+	vec2 PrevPos = m_Core.m_Pos;
 	m_Core.Tick(true, &CoreTickParams);
+	
+	if(GetPlayerClass() == PLAYERCLASS_SNIPER && m_PositionLocked)
+	{
+		m_Core.m_Vel = vec2(0.0f, 0.0f);
+		m_Core.m_Pos = PrevPos;
+	}
 	
 	//Hook protection
 	if(m_Core.m_HookedPlayer >= 0)
 	{
-		CPlayer *pHookedPlayer = GameServer()->m_apPlayers[m_Core.m_HookedPlayer];
-		if(pHookedPlayer)
+		if(GameServer()->m_apPlayers[m_Core.m_HookedPlayer])
 		{
-			if(IsZombie() == pHookedPlayer->IsZombie() && pHookedPlayer->HookProtectionEnabled())
+			if(IsZombie() == GameServer()->m_apPlayers[m_Core.m_HookedPlayer]->IsZombie() && GameServer()->m_apPlayers[m_Core.m_HookedPlayer]->HookProtectionEnabled())
 			{
 				m_Core.m_HookedPlayer = -1;
 				m_Core.m_HookState = HOOK_RETRACTED;
@@ -727,14 +903,9 @@ void CCharacter::Tick()
 		}
 	}
 
-	if(GetPlayerClass() == PLAYERCLASS_BAT)
-	{
-		if(IsGrounded() || g_Config.m_InfBatAirjumpLimit == 0)
-		{
-			m_AirJumpCounter = 0;
-		}
-		else if(m_Core.m_TriggeredEvents&COREEVENT_AIR_JUMP && m_AirJumpCounter < g_Config.m_InfBatAirjumpLimit)
-		{
+	if(GetPlayerClass() == PLAYERCLASS_BAT) {
+		if(IsGrounded() || g_Config.m_InfBatAirjumpLimit == 0) m_AirJumpCounter = 0;
+		else if(m_Core.m_TriggeredEvents&COREEVENT_AIR_JUMP && m_AirJumpCounter < g_Config.m_InfBatAirjumpLimit) {
 			m_Core.m_Jumped &= ~2;
 			m_AirJumpCounter++;
 		}
@@ -742,12 +913,12 @@ void CCharacter::Tick()
 
 	if(GetPlayerClass() == PLAYERCLASS_HERO)
 	{
-		if(!m_pHeroFlag)
+		if (!m_pHeroFlag)
 			m_pHeroFlag = new CHeroFlag(GameServer(), m_pPlayer->GetCID());
 	}
 /* INFECTION MODIFICATION END *****************************************/
 
-	if(m_ResetKillsTime)
+	if (m_ResetKillsTime)
 	{
 		m_ResetKillsTime--;
 		if(!m_ResetKillsTime)
@@ -894,7 +1065,7 @@ bool CCharacter::IncreaseOverallHp(int Amount)
 	}
 	if(Amount > 0)
 	{
-		if(IncreaseArmor(Amount))
+		if (IncreaseArmor(Amount)) 
 			success = true;
 	}
 	return success;
@@ -917,7 +1088,170 @@ void CCharacter::Die(int Killer, int Weapon)
 
 bool CCharacter::TakeDamage(vec2 Force, int Dmg, int From, int Weapon, TAKEDAMAGEMODE Mode)
 {
-	return false;
+/* INFECTION MODIFICATION START ***************************************/
+
+	//KillerPlayer
+	CPlayer* pKillerPlayer = GameServer()->m_apPlayers[From]; // before using this variable check if it exists with "if (pKillerPlayer)"
+	CCharacter *pKillerChar = 0; // before using this variable check if it exists with "if (pKillerChar)"
+	if (pKillerPlayer)
+		pKillerChar = pKillerPlayer->GetCharacter();
+
+	if(Mode == TAKEDAMAGEMODE_INFECTION)
+	{
+	        if (!pKillerPlayer || !pKillerPlayer->IsZombie() || !IsHuman())
+		{
+		        // The infection is only possible if the killer is a zombie and the target is a human
+		        Mode = TAKEDAMAGEMODE_NOINFECTION;
+		}
+	}
+
+	if(GetPlayerClass() == PLAYERCLASS_HERO && Mode == TAKEDAMAGEMODE_INFECTION)
+	{
+		Dmg = 12;
+		// A zombie can't infect a hero
+		Mode = TAKEDAMAGEMODE_NOINFECTION;
+	}
+	
+	if(pKillerChar && pKillerChar->IsInLove())
+	{
+		Dmg = 0;
+		Mode = TAKEDAMAGEMODE_NOINFECTION;
+	}
+	
+	if(
+			(GetPlayerClass() != PLAYERCLASS_HUNTER || Weapon != WEAPON_SHOTGUN) &&
+			!(IsHuman() && Weapon == WEAPON_NINJA) &&
+			!(GetPlayerClass() == PLAYERCLASS_SOLDIER && Weapon == WEAPON_HAMMER))
+	{
+		m_Core.m_Vel += Force;
+	}
+	
+	if(GetPlayerClass() == PLAYERCLASS_GHOUL)
+	{
+		int DamageAccepted = 0;
+		for(int i=0; i<Dmg; i++)
+		{
+			if(random_prob(1.0f - m_pPlayer->GetGhoulPercent()/2.0f))
+				DamageAccepted++;
+		}
+		Dmg = DamageAccepted;
+	}
+
+	if(m_ProtectionTick > 0)
+	{
+		Dmg = 0;
+	}
+
+	if(From != m_pPlayer->GetCID() && pKillerPlayer)
+	{
+		if(IsZombie())
+		{
+			if(pKillerPlayer->IsZombie())
+			{
+				//Heal and unfreeze
+				if(pKillerPlayer->GetClass() == PLAYERCLASS_BOOMER && Weapon == WEAPON_HAMMER)
+				{
+					IncreaseOverallHp(8+random_int(0, 10));
+					if(IsFrozen())
+						Unfreeze();
+
+					SetEmote(EMOTE_HAPPY, Server()->Tick() + Server()->TickSpeed());
+				}
+				return false;
+			}
+		}
+		else
+		{
+			//If the player is a new infected, don't infected other -> nobody knows that he is infected.
+			if(!pKillerPlayer->IsZombie() || (Server()->Tick() - pKillerPlayer->m_InfectionTick)*Server()->TickSpeed() < 0.5) return false;
+		}
+	}
+
+/* INFECTION MODIFICATION END *****************************************/
+
+	// m_pPlayer only inflicts half damage on self
+	if(From == m_pPlayer->GetCID())
+	{
+		if(Mode == TAKEDAMAGEMODE_SELFHARM)
+			Dmg = maximum(1, Dmg/2);
+		else
+			return false;
+	}
+
+	m_DamageTaken++;
+
+	// create healthmod indicator
+	if(Server()->Tick() < m_DamageTakenTick+25)
+	{
+		// make sure that the damage indicators doesn't group together
+		GameServer()->CreateDamageInd(GetPos(), m_DamageTaken*0.25f, Dmg);
+	}
+	else
+	{
+		m_DamageTaken = 0;
+		GameServer()->CreateDamageInd(GetPos(), 0, Dmg);
+	}
+
+/* INFECTION MODIFICATION START ***************************************/
+	if(Dmg)
+	{
+		if(m_Armor)
+		{
+			if(Dmg <= m_Armor)
+			{
+				m_Armor -= Dmg;
+				Dmg = 0;
+			}
+			else
+			{
+				Dmg -= m_Armor;
+				m_Armor = 0;
+			}
+		}
+
+		m_Health -= Dmg;
+	
+		if(From != m_pPlayer->GetCID() && pKillerPlayer)
+			m_NeedFullHeal = true;
+			
+		if(From >= 0 && From != m_pPlayer->GetCID())
+			GameServer()->SendHitSound(From);
+	}
+/* INFECTION MODIFICATION END *****************************************/
+
+	m_DamageTakenTick = Server()->Tick();
+	m_InvisibleTick = Server()->Tick();
+
+	// check for death
+	if(m_Health <= 0)
+	{
+		Die(From, Weapon);
+		return false;
+	}
+
+/* INFECTION MODIFICATION START ***************************************/
+	if(Mode == TAKEDAMAGEMODE_INFECTION)
+	{
+		m_pPlayer->Infect(pKillerPlayer);
+		
+		char aBuf[256];
+		str_format(aBuf, sizeof(aBuf), "kill killer='%s' victim='%s' weapon=%d",
+			Server()->ClientName(From),
+			Server()->ClientName(m_pPlayer->GetCID()), Weapon);
+		GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_DEBUG, "game", aBuf);
+
+		GameServer()->SendKillMessage(From, m_pPlayer->GetCID(), WEAPON_HAMMER, 0);
+	}
+/* INFECTION MODIFICATION END *****************************************/
+
+	if (Dmg > 2)
+		GameServer()->CreateSound(GetPos(), SOUND_PLAYER_PAIN_LONG);
+	else
+		GameServer()->CreateSound(GetPos(), SOUND_PLAYER_PAIN_SHORT);
+
+	SetEmote(EMOTE_PAIN, Server()->Tick() + 500 * Server()->TickSpeed() / 1000);
+
+	return true;
 }
 
 void CCharacter::Snap(int SnappingClient)
@@ -932,7 +1266,7 @@ void CCharacter::Snap(int SnappingClient)
 
 	if(SnappingClient == m_pPlayer->GetCID())
 	{
-		if((GetPlayerClass() == PLAYERCLASS_WITCH) && ((m_ActiveWeapon == WEAPON_LASER) || ((m_ActiveWeapon == WEAPON_HAMMER))))
+		if((GetPlayerClass() == PLAYERCLASS_WITCH) && ((m_ActiveWeapon == WEAPON_LASER) || ((m_ActiveWeapon == WEAPON_HAMMER) && !HasPortal())))
 		{
 			vec2 SpawnPos;
 			if(FindWitchSpawnPosition(SpawnPos))
@@ -970,7 +1304,7 @@ void CCharacter::Snap(int SnappingClient)
 				// display laser beam for 0.5 seconds
 				int tickShowBeamTime = Server()->TickSpeed()*0.5;
 				long ticksInactive = tickShowBeamTime - (Server()->Tick()-tickLimit);
-				if(g_Config.m_InfHeroFlagIndicatorTime > 0 && ticksInactive > 0)
+				if (g_Config.m_InfHeroFlagIndicatorTime > 0 && ticksInactive > 0) 
 				{
 					CNetObj_Laser *pObj = static_cast<CNetObj_Laser *>(Server()->SnapNewItem(NETOBJTYPE_LASER, m_ID, sizeof(CNetObj_Laser)));
 					if(!pObj)
@@ -982,7 +1316,7 @@ void CCharacter::Snap(int SnappingClient)
 					pObj->m_Y = (int)Indicator.y;
 					pObj->m_FromX = (int)IndicatorM.x;
 					pObj->m_FromY = (int)IndicatorM.y;
-					if(ticksInactive < 4)
+					if (ticksInactive < 4)
 						pObj->m_StartTick = Server()->Tick()-(6-ticksInactive);
 					else 
 						pObj->m_StartTick = Server()->Tick()-3;
@@ -1017,9 +1351,9 @@ void CCharacter::Snap(int SnappingClient)
 		m_SendCore.Write(pCharacter);
 	}
 
-	if(pCharacter->m_HookedPlayer != -1)
+	if (pCharacter->m_HookedPlayer != -1)
 	{
-		if(!Server()->Translate(pCharacter->m_HookedPlayer, SnappingClient))
+		if (!Server()->Translate(pCharacter->m_HookedPlayer, SnappingClient))
 			pCharacter->m_HookedPlayer = -1;
 	}
 	pCharacter->m_Emote = m_EmoteType;
@@ -1094,11 +1428,50 @@ int CCharacter::GetPlayerClass() const
 		return m_pPlayer->GetClass();
 }
 
+void CCharacter::ClassSpawnAttributes()
+{
+	m_Health = 10;
+	m_IsInvisible = false;
+
+	const int PlayerClass = GetPlayerClass();
+	const bool isHuman = PlayerClass < END_HUMANCLASS; // PLAYERCLASS_NONE is also a human (not infected) class
+	if (isHuman)
+	{
+		m_pPlayer->m_InfectionTick = -1;
+	}
+	else
+	{
+		m_Armor = 0;
+	}
+
+	if(PlayerClass == PLAYERCLASS_HERO)
+	{
+		m_pHeroFlag = nullptr;
+	}
+
+	m_canOpenPortals = GameServer()->m_pController->PortalsAvailableForCharacter(this);
+
+	if (PlayerClass != PLAYERCLASS_NONE)
+	{
+		GameServer()->SendBroadcast_ClassIntro(m_pPlayer->GetCID(), PlayerClass);
+		if(!m_pPlayer->IsKnownClass(PlayerClass))
+		{
+			const char *className = CInfClassGameController::GetClassName(PlayerClass);
+			GameServer()->SendChatTarget_Localization(m_pPlayer->GetCID(), CHATCATEGORY_DEFAULT, _("Type “/help {str:ClassName}” for more information about your class"), "ClassName", className, NULL);
+			m_pPlayer->m_knownClass[PlayerClass] = true;
+		}
+	}
+}
+
 void CCharacter::DestroyChildEntities()
 {
+	m_NinjaLevel = 0;
 	m_NinjaVelocityBuff = 0;
 	m_NinjaStrengthBuff = 0;
 	m_NinjaAmmoBuff = 0;
+	m_NinjaAmmoRegenReduction = 0;
+	m_NinjaExtraDarts = 0;
+	m_NinjaExtraFlashRadius = 0;
 	
 	for(CProjectile *pProjectile = (CProjectile*) GameWorld()->FindFirst(CGameWorld::ENTTYPE_PROJECTILE); pProjectile; pProjectile = (CProjectile*) pProjectile->TypeNext())
 	{
@@ -1181,43 +1554,17 @@ void CCharacter::DestroyChildEntities()
 		GameServer()->m_World.DestroyEntity(pFlag);
 	}
 
+	for(CPortal* pPortal = (CPortal*) GameWorld()->FindFirst(CGameWorld::ENTTYPE_PORTAL); pPortal; pPortal = (CPortal*) pPortal->TypeNext())
+	{
+		if(pPortal->GetOwner() != m_pPlayer->GetCID()) continue;
+		GameServer()->m_World.DestroyEntity(pPortal);
+	}
+			
 	m_FirstShot = true;
 	m_HookMode = 0;
-}
-
-void CCharacter::FreeChildSnapIDs()
-{
-	if(m_FlagID >= 0)
-	{
-		Server()->SnapFreeID(m_FlagID);
-		m_FlagID = -1;
-	}
-	if(m_HeartID >= 0)
-	{
-		Server()->SnapFreeID(m_HeartID);
-		m_HeartID = -1;
-	}
-	if(m_CursorID >= 0)
-	{
-		Server()->SnapFreeID(m_CursorID);
-		m_CursorID = -1;
-	}
-
-	if(m_BarrierHintID >= 0)
-	{
-		Server()->SnapFreeID(m_BarrierHintID);
-		m_BarrierHintID = -1;
-	}
-
-	if(m_BarrierHintIDs[0] >= 0)
-	{
-		for(int i=0; i<2; i++)
-		{
-			Server()->SnapFreeID(m_BarrierHintIDs[i]);
-			m_BarrierHintIDs[i] = -1;
-		}
-
-	}
+	m_PositionLockTick = 0;
+	m_PositionLocked = false;
+	m_PositionLockAvailable = false;
 }
 
 bool CCharacter::IsZombie() const
@@ -1253,6 +1600,15 @@ void CCharacter::SlipperyEffect()
 		m_SlipperyTick = Server()->TickSpeed()/2;
 }
 
+void CCharacter::GrantSpawnProtection()
+{
+	// Indicate time left being protected via eyes
+	if(m_ProtectionTick <= 0) {
+		m_ProtectionTick = Server()->TickSpeed() * g_Config.m_InfSpawnProtectionTime;
+		SetEmote(EMOTE_SURPRISE, Server()->Tick() + m_ProtectionTick);
+  }
+}
+
 void CCharacter::Freeze(float Time, int Player, FREEZEREASON Reason)
 {
 	if(m_IsFrozen && m_FreezeReason == FREEZEREASON_UNDEAD)
@@ -1275,10 +1631,6 @@ void CCharacter::Unfreeze()
 		m_Health = 10.0;
 	}
 	
-	if(m_pPlayer)
-	{
-		GameServer()->ClearBroadcast(m_pPlayer->GetCID(), BROADCAST_PRIORITY_EFFECTSTATE);
-	}
 	GameServer()->CreatePlayerSpawn(GetPos());
 }
 
@@ -1295,8 +1647,7 @@ bool CCharacter::IsInSlowMotion() const
 // duration in centiSec (10 == 1 second)
 void CCharacter::SlowMotionEffect(float duration)
 {
-	if(duration == 0)
-		return;
+	if (duration == 0) return;
 	duration *= 0.1f;
 	if(m_SlowMotionTick <= 0)
 	{
@@ -1325,7 +1676,7 @@ int CCharacter::GetInfWeaponID(int WID) const
 			case PLAYERCLASS_MERCENARY:
 				return INFWEAPON_MERCENARY_GUN;
 			default:
-				return INFWEAPON_GUN;
+				return INFWEAPON_ROCKET;
 		}
 		return INFWEAPON_GUN;
 	}
@@ -1345,6 +1696,21 @@ int CCharacter::GetInfWeaponID(int WID) const
 	}
 	else if(WID == WEAPON_GRENADE)
 	{
+		if(g_Config.m_InfRocketMode == 1)
+		{
+			switch(GetPlayerClass())
+			{
+			case PLAYERCLASS_MERCENARY:
+				return INFWEAPON_MERCENARY_GRENADE;
+			case PLAYERCLASS_MEDIC:
+				return INFWEAPON_MEDIC_GRENADE;
+			case PLAYERCLASS_NINJA:
+				return INFWEAPON_NINJA_GRENADE;
+			case PLAYERCLASS_SCIENTIST:
+				return INFWEAPON_SCIENTIST_GRENADE;
+
+			}
+		}
 		switch(GetPlayerClass())
 		{
 			case PLAYERCLASS_MERCENARY:
@@ -1383,6 +1749,8 @@ int CCharacter::GetInfWeaponID(int WID) const
 				return INFWEAPON_BIOLOGIST_LASER;
 			case PLAYERCLASS_MEDIC:
 				return INFWEAPON_MEDIC_LASER;
+			case PLAYERCLASS_WITCH:
+				return INFWEAPON_WITCH_PORTAL_LASER;
 			case PLAYERCLASS_MERCENARY:
 				return INFWEAPON_MERCENARY_LASER;
 			default:
@@ -1393,10 +1761,13 @@ int CCharacter::GetInfWeaponID(int WID) const
 	{
 		return INFWEAPON_NINJA;
 	}
-	else
-	{
-		return INFWEAPON_NONE;
-	}
+	else return INFWEAPON_NONE;
+}
+
+int CCharacter::GetInfZoneTick() // returns how many ticks long a player is already in InfZone
+{
+	if (m_InfZoneTick < 0) return 0;
+	return Server()->Tick()-m_InfZoneTick;
 }
 
 /* INFECTION MODIFICATION END *****************************************/

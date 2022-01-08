@@ -1,7 +1,6 @@
 #include "infcplayer.h"
 
 #include <engine/shared/config.h>
-#include <game/server/gamecontext.h>
 #include <game/server/infclass/infcgamecontroller.h>
 
 #include "classes/humans/human.h"
@@ -15,13 +14,15 @@ CInfClassPlayer::CInfClassPlayer(CInfClassGameController *pGameController, int C
 	: CPlayer(pGameController->GameServer(), ClientID, Team)
 	, m_pGameController(pGameController)
 {
-	m_class = PLAYERCLASS_INVALID;
-	SetClass(PLAYERCLASS_NONE);
+	SetCharacterClass(new(m_ClientID) CInfClassHuman(this));
 }
 
 CInfClassPlayer::~CInfClassPlayer()
 {
-	SetCharacterClass(nullptr);
+	if(m_pInfcPlayerClass)
+		delete m_pInfcPlayerClass;
+
+	m_pInfcPlayerClass = nullptr;
 }
 
 CInfClassGameController *CInfClassPlayer::GameController()
@@ -31,18 +32,22 @@ CInfClassGameController *CInfClassPlayer::GameController()
 
 void CInfClassPlayer::TryRespawn()
 {
-	SpawnContext Context;
-	if(!GameController()->TryRespawn(this, &Context))
+	vec2 SpawnPos;
+
+/* INFECTION MODIFICATION START ***************************************/
+	if(!GameServer()->m_pController->PreSpawn(this, &SpawnPos))
 		return;
+/* INFECTION MODIFICATION END *****************************************/
 
 	m_Spawning = false;
 	CInfClassCharacter *pCharacter = new(m_ClientID) CInfClassCharacter(GameController());
 
 	m_pCharacter = pCharacter;
-	pCharacter->Spawn(this, Context.SpawnPos);
-	m_pInfcPlayerClass->SetCharacter(pCharacter);
-
-	pCharacter->OnCharacterSpawned(Context);
+	m_pCharacter->Spawn(this, SpawnPos);
+	pCharacter->SetClass(m_pInfcPlayerClass);
+	pCharacter->OnCharacterSpawned();
+	if(GetClass() != PLAYERCLASS_NONE)
+		GameServer()->CreatePlayerSpawn(SpawnPos);
 }
 
 void CInfClassPlayer::Tick()
@@ -50,7 +55,23 @@ void CInfClassPlayer::Tick()
 	if(!Server()->ClientIngame(m_ClientID))
 		return;
 
-	HandleInfection();
+	if(m_DoInfection)
+	{
+
+		if(IsHuman())
+		{
+			m_InfectionTick = Server()->Tick();
+		}
+
+		int c = GameController()->ChooseInfectedClass(this);
+		CInfClassPlayer *pInfectiousPlayer = GameController()->GetPlayer(m_InfectiousPlayerCID);
+
+		m_DoInfection = false;
+		m_InfectiousPlayerCID = -1;
+
+		SetClass(c);
+		GameServer()->m_pController->OnPlayerInfected(this, pInfectiousPlayer);
+	}
 
 	CPlayer::Tick();
 
@@ -81,33 +102,6 @@ void CInfClassPlayer::Tick()
 	HandleTuningParams();
 }
 
-void CInfClassPlayer::HandleInfection()
-{
-	if(m_DoInfection == DO_INFECTION::NO)
-	{
-		return;
-	}
-	if(IsZombie() && (m_DoInfection != DO_INFECTION::FORCED))
-	{
-		// Do not infect if inf class already set
-		m_DoInfection = DO_INFECTION::NO;
-		return;
-	}
-
-	if(IsHuman())
-	{
-		m_InfectionTick = Server()->Tick();
-	}
-
-	const int PreviousClass = GetClass();
-	CInfClassPlayer *pInfectiousPlayer = GameController()->GetPlayer(m_InfectiousPlayerCID);
-
-	m_DoInfection = DO_INFECTION::NO;
-	m_InfectiousPlayerCID = -1;
-
-	GameController()->OnPlayerInfected(this, pInfectiousPlayer, PreviousClass);
-}
-
 int CInfClassPlayer::GetDefaultEmote() const
 {
 	if(m_pInfcPlayerClass)
@@ -124,12 +118,15 @@ CInfClassCharacter *CInfClassPlayer::GetCharacter()
 void CInfClassPlayer::SetCharacterClass(CInfClassPlayerClass *pClass)
 {
 	if(m_pInfcPlayerClass)
-	{
-		m_pInfcPlayerClass->SetCharacter(nullptr);
 		delete m_pInfcPlayerClass;
-	}
 
 	m_pInfcPlayerClass = pClass;
+
+	if(m_pCharacter)
+	{
+		CInfClassCharacter *pCharacter = static_cast<CInfClassCharacter*>(m_pCharacter);
+		pCharacter->SetClass(m_pInfcPlayerClass);
+	}
 }
 
 void CInfClassPlayer::SetClass(int newClass)
@@ -170,68 +167,25 @@ void CInfClassPlayer::SetClass(int newClass)
 
 	m_class = newClass;
 
-	const bool HadHumanClass = GetCharacterClass() && GetCharacterClass()->IsHuman();
-	const bool HadInfectedClass = GetCharacterClass() && GetCharacterClass()->IsZombie();
+	if(m_class < END_HUMANCLASS)
+		HookProtection(true);
+	else
+		HookProtection(true); // true = hook protection for zombies by default
 
-	if(IsHuman() && !HadHumanClass)
+	if(IsHuman() && !GetCharacterClass()->IsHuman())
 	{
 		SetCharacterClass(new(m_ClientID) CInfClassHuman(this));
 	}
-	else if (IsZombie() && !HadInfectedClass)
+	else if (IsZombie() && !GetCharacterClass()->IsZombie())
 	{
 		SetCharacterClass(new(m_ClientID) CInfClassInfected(this));
 	}
-
-	// Skip the SetCharacter() routine if the World ResetRequested because it
-	// means that the Character is going to be destroyed during this
-	// IGameServer::Tick() which also invalidates possible auto class selection.
-	if(!GameServer()->m_World.m_ResetRequested)
+	else if(m_pCharacter)
 	{
-		m_pInfcPlayerClass->SetCharacter(GetCharacter());
+		GetCharacter()->SetClass(m_pInfcPlayerClass);
 	}
-	m_pInfcPlayerClass->OnPlayerClassChanged();
-}
 
-void CInfClassPlayer::Infect(CPlayer *pInfectiousPlayer)
-{
-	StartInfection(/* force */ false, pInfectiousPlayer);
-}
-
-void CInfClassPlayer::StartInfection(bool force, CPlayer *pInfectiousPlayer)
-{
-	if(!force && IsZombie())
-		return;
-
-	m_DoInfection = force ? DO_INFECTION::FORCED : DO_INFECTION::REGULAR;
-	m_InfectiousPlayerCID = pInfectiousPlayer ? pInfectiousPlayer->GetCID() : -1;
-}
-
-void CInfClassPlayer::OpenMapMenu(int Menu)
-{
-	m_MapMenu = Menu;
-	m_MapMenuTick = 0;
-}
-
-void CInfClassPlayer::CloseMapMenu()
-{
-	m_MapMenu = 0;
-	m_MapMenuTick = -1;
-}
-
-bool CInfClassPlayer::MapMenuClickable()
-{
-	return (m_MapMenu > 0 && (m_MapMenuTick > Server()->TickSpeed()/2));
-}
-
-float CInfClassPlayer::GetGhoulPercent() const
-{
-	return clamp(m_GhoulLevel/static_cast<float>(g_Config.m_InfGhoulStomachSize), 0.0f, 1.0f);
-}
-
-void CInfClassPlayer::IncreaseGhoulLevel(int Diff)
-{
-	int NewGhoulLevel = m_GhoulLevel + Diff;
-	m_GhoulLevel = clamp(NewGhoulLevel, 0, g_Config.m_InfGhoulStomachSize);
+	GetCharacterClass()->OnPlayerClassChanged();
 }
 
 const char *CInfClassPlayer::GetClan(int SnappingClient) const

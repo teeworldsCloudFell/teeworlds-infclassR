@@ -15,8 +15,6 @@
 #include <game/server/infclass/infcplayer.h>
 #include <game/server/teeinfo.h>
 
-static const int SniperPositionLockTimeLimit = 15;
-
 MACRO_ALLOC_POOL_ID_IMPL(CInfClassHuman, MAX_CLIENTS)
 
 CInfClassHuman::CInfClassHuman(CInfClassPlayer *pPlayer)
@@ -33,6 +31,7 @@ void CInfClassHuman::GetAmmoRegenParams(int Weapon, WeaponRegenParams *pParams)
 	if(InfWID == INFWEAPON_NINJA_GRENADE)
 	{
 		pParams->MaxAmmo = minimum(pParams->MaxAmmo + m_pCharacter->m_NinjaAmmoBuff, 10);
+		pParams->RegenInterval = maximum(pParams->RegenInterval - m_pCharacter->m_NinjaAmmoRegenReduction, 100);
 	}
 
 	if(InfWID == INFWEAPON_MERCENARY_GUN)
@@ -52,22 +51,7 @@ void CInfClassHuman::OnCharacterPreCoreTick()
 	{
 		case PLAYERCLASS_SNIPER:
 		{
-			if(m_pCharacter->PositionIsLocked())
-			{
-				--m_PositionLockTicksRemaining;
-				if(m_PositionLockTicksRemaining <= 0)
-					m_pCharacter->UnlockPosition();
-			}
-
-			if(!m_pCharacter->PositionIsLocked())
-			{
-				if(m_pCharacter->IsGrounded())
-				{
-					m_PositionLockTicksRemaining = Server()->TickSpeed() * SniperPositionLockTimeLimit;
-				}
-			}
-
-			if(m_pCharacter->PositionIsLocked())
+			if(m_pCharacter->m_PositionLocked)
 			{
 				if(m_pCharacter->m_Input.m_Jump && !m_pCharacter->m_PrevInput.m_Jump)
 				{
@@ -78,13 +62,19 @@ void CInfClassHuman::OnCharacterPreCoreTick()
 					m_pCharacter->ResetMovementsInput();
 				}
 			}
+
+			if(m_pCharacter->GetInAirTick() <= Server()->TickSpeed())
+			{
+				// Allow to re-lock in during the first second
+				m_pCharacter->m_PositionLockAvailable = true;
+			}
 		}
 			break;
 		case PLAYERCLASS_NINJA:
 		{
 			if(m_pCharacter->IsGrounded() && m_pCharacter->m_DartLifeSpan <= 0)
 			{
-				m_pCharacter->m_DartLeft = Config()->m_InfNinjaJump;
+				m_pCharacter->m_DartLeft = Config()->m_InfNinjaJump + m_pCharacter->m_NinjaExtraDarts;
 			}
 		}
 			break;
@@ -95,7 +85,6 @@ void CInfClassHuman::OnCharacterPreCoreTick()
 
 void CInfClassHuman::OnCharacterTick()
 {
-	CInfClassPlayerClass::OnCharacterTick();
 }
 
 void CInfClassHuman::OnCharacterSnap(int SnappingClient)
@@ -137,31 +126,8 @@ void CInfClassHuman::OnCharacterSnap(int SnappingClient)
 	}
 }
 
-void CInfClassHuman::OnHammerFired(WeaponFireContext *pFireContext)
-{
-	switch(GetPlayerClass())
-	{
-		case PLAYERCLASS_SNIPER:
-			if(m_pCharacter->PositionIsLocked())
-			{
-				m_pCharacter->UnlockPosition();
-			}
-			else if(PositionLockAvailable())
-			{
-				m_pCharacter->LockPosition();
-			}
-		default:
-			break;
-	}
-}
-
 void CInfClassHuman::GiveClassAttributes()
 {
-	if(!m_pCharacter)
-	{
-		return;
-	}
-
 	CInfClassPlayerClass::GiveClassAttributes();
 
 	switch(GetPlayerClass())
@@ -240,27 +206,6 @@ void CInfClassHuman::GiveClassAttributes()
 			m_pCharacter->SetActiveWeapon(WEAPON_HAMMER);
 			break;
 	}
-
-	if(GetPlayerClass() == PLAYERCLASS_SNIPER)
-	{
-		m_PositionLockTicksRemaining = Server()->TickSpeed() * SniperPositionLockTimeLimit;;
-	}
-	else
-	{
-		m_PositionLockTicksRemaining = 0;
-	}
-	m_pCharacter->UnlockPosition();
-}
-
-void CInfClassHuman::DestroyChildEntities()
-{
-	if(!m_pCharacter)
-	{
-		return;
-	}
-
-	m_PositionLockTicksRemaining = 0;
-	m_pCharacter->UnlockPosition();
 }
 
 bool CInfClassHuman::SetupSkin(int PlayerClass, CTeeInfo *output)
@@ -446,7 +391,7 @@ void CInfClassHuman::BroadcastWeaponState()
 		{
 			GameServer()->SendBroadcast_Localization(GetPlayer()->GetCID(),
 				BROADCAST_PRIORITY_WEAPONSTATE, BROADCAST_DURATION_REALTIME,
-				_("The white hole is available!"),
+				_("WhiteHole ready !"),
 				NULL
 			);
 		}
@@ -471,20 +416,16 @@ void CInfClassHuman::BroadcastWeaponState()
 		}
 		else if(NumMines > 0 && pCurrentWhiteHole)
 		{
-			dynamic_string Buffer;
-			Server()->Localization()->Format_LP(Buffer, GetPlayer()->GetLanguage(), NumMines,
-				_P("One mine is active", "{int:NumMines} mines are active"),
-				"NumMines", &NumMines,
-				nullptr);
-			Buffer.append("\n");
 			int Seconds = 1+pCurrentWhiteHole->LifeSpan()/Server()->TickSpeed();
-			Server()->Localization()->Format_L(Buffer, GetPlayer()->GetLanguage(),
-				_("White hole: {sec:RemainingTime}"),
+			GameServer()->SendBroadcast_Localization(GetPlayer()->GetCID(),
+				BROADCAST_PRIORITY_WEAPONSTATE, BROADCAST_DURATION_REALTIME,
+				_("{int:NumMines} mines are active\nWhite hole: {sec:RemainingTime}"),
+				"NumMines", &NumMines,
 				"RemainingTime", &Seconds,
-				nullptr);
-			GameServer()->SendBroadcast(GetCID(), Buffer.buffer(),
-				BROADCAST_PRIORITY_WEAPONSTATE, BROADCAST_DURATION_REALTIME);
+				NULL
+			);
 		}
+
 	}
 	else if(GetPlayerClass() == PLAYERCLASS_BIOLOGIST)
 	{
@@ -506,8 +447,8 @@ void CInfClassHuman::BroadcastWeaponState()
 	}
 	else if(GetPlayerClass() == PLAYERCLASS_NINJA)
 	{
-		int TargetID = GameController()->GetTargetToKill();
-		int CoolDown = GameController()->GetTargetToKillCoolDown();
+		int TargetID = GameServer()->GetTargetToKill();
+		int CoolDown = GameServer()->GetTargetToKillCoolDown();
 
 		if(CoolDown > 0)
 		{
@@ -531,9 +472,9 @@ void CInfClassHuman::BroadcastWeaponState()
 	}
 	else if(GetPlayerClass() == PLAYERCLASS_SNIPER)
 	{
-		if(m_pCharacter->PositionIsLocked())
+		if(m_pCharacter->m_PositionLocked)
 		{
-			int Seconds = 1+m_PositionLockTicksRemaining/Server()->TickSpeed();
+			int Seconds = 1+m_pCharacter->m_PositionLockTick/Server()->TickSpeed();
 			GameServer()->SendBroadcast_Localization(GetPlayer()->GetCID(),
 				BROADCAST_PRIORITY_WEAPONSTATE, BROADCAST_DURATION_REALTIME,
 				_("Position lock: {sec:RemainingTime}"),
@@ -658,22 +599,6 @@ void CInfClassHuman::BroadcastWeaponState()
 			);
 		}
 	}
-}
-
-bool CInfClassHuman::PositionLockAvailable() const
-{
-	const int TickSpeed = GameContext()->Server()->TickSpeed();
-	if(m_PositionLockTicksRemaining < TickSpeed * (SniperPositionLockTimeLimit - 1))
-	{
-		return false;
-	}
-
-	if(GetPos().y <= -600)
-	{
-		return false;
-	}
-
-	return true;
 }
 
 void CInfClassHuman::OnSlimeEffect(int Owner)

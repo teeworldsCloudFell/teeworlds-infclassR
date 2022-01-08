@@ -10,7 +10,7 @@
 #include "infccharacter.h"
 
 CLooperWall::CLooperWall(CGameContext *pGameContext, vec2 Pos1, vec2 Pos2, int Owner)
-	: CPlacedObject(pGameContext, CGameWorld::ENTTYPE_LOOPER_WALL, Pos1, Owner)
+	: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_LOOPER_WALL, Pos1, Owner)
 {
 	if(distance(Pos1, Pos2) > g_BarrierMaxLength)
 	{
@@ -109,10 +109,7 @@ void CLooperWall::TickPaused()
 }
 
 void CLooperWall::Snap(int SnappingClient)
-{
-	if(!DoSnapForClient(SnappingClient))
-		return;
-
+{	
 	// Laser dieing animation
 	int LifeDiff = 0;
 	if (m_LifeSpan < 1*Server()->TickSpeed())
@@ -130,6 +127,9 @@ void CLooperWall::Snap(int SnappingClient)
 
 	for(int i=0; i<2; i++) 
 	{
+		if(NetworkClipped(SnappingClient))
+			return;
+
 		if (i == 1)
 		{
 			dirVecT.x = -dirVecT.x;

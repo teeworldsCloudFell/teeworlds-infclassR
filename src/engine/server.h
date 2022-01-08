@@ -49,6 +49,10 @@ enum INFWEAPON
 	INFWEAPON_MERCENARY_GUN,
 	INFWEAPON_MERCENARY_GRENADE,
 	INFWEAPON_MERCENARY_LASER,
+	
+	INFWEAPON_WITCH_PORTAL_LASER,
+
+	INFWEAPON_ROCKET,
 
 	NB_INFWEAPON
 };
@@ -273,7 +277,7 @@ public:
 		RCON_CID_VOTE=-2,
 	};
 	virtual void SetRconCID(int ClientID) = 0;
-	virtual int GetAuthedState(int ClientID) const = 0;
+	virtual bool IsAuthed(int ClientID) const = 0;
 	virtual void Kick(int ClientID, const char *pReason) = 0;
 
 	virtual void DemoRecorder_HandleAutoStart() = 0;
@@ -315,8 +319,12 @@ public:
 	virtual void SetClassAvailability(int CID, int n) = 0;
 	
 	virtual int IsClassChooserEnabled() = 0;
+	virtual bool GetPlayerClassEnabled(int PlayerClass) const = 0;
 	virtual void SetPlayerClassEnabled(int PlayerClass, bool Enabled) = 0;
+	virtual int GetMinPlayersForClass(int PlayerClass) const = 0;
+	virtual int GetClassPlayerLimit(int PlayerClass) const = 0;
 
+	virtual int GetPlayerClassProbability(int PlayerClass) const = 0;
 	virtual void SetPlayerClassProbability(int PlayerClass, int Probability) = 0;
 	
 	virtual bool IsClientLogged(int ClientID) = 0;
@@ -414,6 +422,11 @@ public:
 	
 	virtual void OnSetAuthed(int ClientID, int Level) = 0;
 	
+	virtual int GetTargetToKill() = 0;
+	virtual void TargetKilled() = 0;
+	virtual void EnableTargetToKill() = 0;
+	virtual void DisableTargetToKill() = 0;
+	virtual int GetTargetToKillCoolDown() = 0;
 	virtual int GetHeroGiftCoolDown() = 0;
 	virtual void FlagCollected() = 0;
 /* INFECTION MODIFICATION END *****************************************/

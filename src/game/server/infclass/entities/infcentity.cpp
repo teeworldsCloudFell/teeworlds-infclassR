@@ -29,11 +29,3 @@ void CInfCEntity::SetPos(const vec2 &Position)
 {
 	m_Pos = Position;
 }
-
-bool CInfCEntity::DoSnapForClient(int SnappingClient)
-{
-	if(NetworkClipped(SnappingClient))
-		return false;
-
-	return true;
-}

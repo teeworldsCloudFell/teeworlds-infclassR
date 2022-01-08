@@ -3,25 +3,21 @@
 #ifndef GAME_SERVER_GAMECONTEXT_H
 #define GAME_SERVER_GAMECONTEXT_H
 
-#include <base/tl/array_on_stack.h>
-#include <base/tl/string.h>
-
 #include <engine/server.h>
 #include <engine/storage.h>
 #include <engine/console.h>
 #include <engine/shared/memheap.h>
 
-#include <game/collision.h>
 #include <game/layers.h>
 #include <game/voting.h>
 #include <game/server/classes.h>
 
 #include <teeuniverses/components/localization.h>
 
-#include "entities/character.h"
 #include "eventhandler.h"
 #include "gamecontroller.h"
 #include "gameworld.h"
+#include "player.h"
 
 #include <fstream>
 
@@ -85,6 +81,8 @@ class CGameContext : public IGameServer
 	CCollision m_Collision;
 	CNetObjHandler m_NetObjHandler;
 	CTuningParams m_Tuning;
+	int m_TargetToKill;
+	int m_TargetToKillCoolDown;
 	int m_HeroGiftCooldown;
 
 	static bool ConTuneParam(IConsole::IResult *pResult, void *pUserData);
@@ -186,27 +184,26 @@ public:
 	CVoteOptionServer *m_pVoteOptionLast;
 
 	// helper functions
-	void CreateDamageInd(vec2 Pos, float AngleMod, int Amount, int64_t Mask = -1);
-	void CreateExplosion(vec2 Pos, int Owner, int Weapon, int64_t Mask = -1);
-	void CreateHammerHit(vec2 Pos, int64_t Mask = -1);
-	void CreatePlayerSpawn(vec2 Pos, int64_t Mask = -1);
-	void CreateDeath(vec2 Pos, int Who, int64_t Mask = -1);
-	void CreateSound(vec2 Pos, int Sound, int64_t Mask = -1);
-	void CreateSoundGlobal(int Sound, int Target = -1);
+	void CreateDamageInd(vec2 Pos, float AngleMod, int Amount);
+	void CreateExplosion(vec2 Pos, int Owner, int Weapon, bool NoDamage, TAKEDAMAGEMODE TakeDamageMode = TAKEDAMAGEMODE_NOINFECTION, float DamageFactor = 1.0f, float ForceValue = 0);
+	void CreateExplosionDisk(vec2 Pos, float InnerRadius, float DamageRadius, int Damage, float Force, int Owner, int Weapon, TAKEDAMAGEMODE TakeDamageMode = TAKEDAMAGEMODE_NOINFECTION);
+	void CreateHammerHit(vec2 Pos);
+	void CreatePlayerSpawn(vec2 Pos);
+	void CreateDeath(vec2 Pos, int Who);
+	void CreateSound(vec2 Pos, int Sound, int64 Mask=-1);
+	void CreateSoundGlobal(int Sound, int Target=-1);
 
 	enum
 	{
-		CHAT_ALL = -2,
-		CHAT_SPEC = -1,
-		CHAT_RED = 0,
-		CHAT_BLUE = 1,
-		CHAT_WHISPER_SEND = 2,
-		CHAT_WHISPER_RECV = 3,
+		CHAT_ALL=-2,
+		CHAT_SPEC=-1,
+		CHAT_RED=0,
+		CHAT_BLUE=1
 	};
 
 	// network
 	void CallVote(int ClientID, const char *aDesc, const char *aCmd, const char *pReason, const char *aChatmsg);
-	void SendChatTarget(int To, const char *pText);
+	virtual void SendChatTarget(int To, const char *pText);
 	void SendChat(int ClientID, int Team, const char *pText);
 	void SendEmoticon(int ClientID, int Emoticon);
 	void SendWeaponPickup(int ClientID, int Weapon);
@@ -228,7 +225,6 @@ public:
 	virtual void OnSnap(int ClientID);
 	virtual void OnPostSnap();
 
-	void CensorMessage(char *pCensoredMessage, const char *pMessage, int Size);
 	virtual void OnMessage(int MsgID, CUnpacker *pUnpacker, int ClientID);
 
 	virtual void OnClientConnected(int ClientID);
@@ -257,8 +253,7 @@ private:
 	static void ChatConsolePrintCallback(const char *pLine, void *pUser);
 
 	static bool ConCredits(IConsole::IResult *pResult, void *pUserData);
-	static bool ConAbout(IConsole::IResult *pResult, void *pUserData);
-	bool ConAbout(IConsole::IResult *pResult);
+	static bool ConInfo(IConsole::IResult *pResult, void *pUserData);
 	static bool ConVersion(IConsole::IResult *pResult, void *pUserData);
 	static bool ConRegister(IConsole::IResult *pResult, void *pUserData);
 	static bool ConLogin(IConsole::IResult *pResult, void *pUserData);
@@ -272,23 +267,18 @@ private:
 	static bool ConStats(IConsole::IResult *pResult, void *pUserData);
 #endif
 	static bool ConHelp(IConsole::IResult *pResult, void *pUserData);
-	bool ConHelp(IConsole::IResult *pResult);
 	static bool ConCustomSkin(IConsole::IResult *pResult, void *pUserData);
 	static bool ConAlwaysRandom(IConsole::IResult *pResult, void *pUserData);
 	static bool ConAntiPing(IConsole::IResult *pResult, void *pUserData);
 	static bool ConLanguage(IConsole::IResult *pResult, void *pUserData);
 	static bool ConCmdList(IConsole::IResult *pResult, void *pUserData);
 	static bool ConChangeLog(IConsole::IResult *pResult, void *pUserData);
-	bool ConChangeLog(IConsole::IResult *pResult);
-	static bool ConReloadChangeLog(IConsole::IResult *pResult, void *pUserData);
 
 	static bool ConClearFunRounds(IConsole::IResult *pResult, void *pUserData);
 	static bool ConAddFunRound(IConsole::IResult *pResult, void *pUserData);
 
 	bool PrivateMessage(const char* pStr, int ClientID, bool TeamChat);
-	void Whisper(int ClientID, char *pStr);
-	void WhisperID(int ClientID, int VictimID, const char *pMessage);
-	void Converse(int ClientID, const char *pStr);
+	void Converse(int ClientID, const char* pStr, int team);
 	void MutePlayer(const char* pStr, int ClientID);
 
 	void InitGeolocation();
@@ -331,18 +321,12 @@ public:
 	void SendScoreSound(int ClientID);
 	void AddBroadcast(int ClientID, const char* pText, int Priority, int LifeSpan);
 	void SetClientLanguage(int ClientID, const char *pLanguage);
-	void InitChangelog();
-	void ReloadChangelog();
-
-	bool MapExists(const char *pMapName) const;
 	
 private:
 	int m_VoteLanguageTick[MAX_CLIENTS];
 	char m_VoteLanguage[MAX_CLIENTS][16];
 	int m_VoteBanClientID;
 	static bool m_ClientMuted[MAX_CLIENTS][MAX_CLIENTS]; // m_ClientMuted[i][j]: i muted j
-	static array_on_stack<string, 256> m_aChangeLogEntries;
-	static array_on_stack<int, 16> m_aChangeLogPageIndices;
 	
 	class CBroadcastState
 	{
@@ -393,6 +377,11 @@ private:
 	std::vector<FunRoundConfiguration> m_FunRoundConfigurations;
 
 public:
+	virtual int GetTargetToKill();
+	virtual void TargetKilled();
+	virtual void EnableTargetToKill() { m_TargetToKill = (m_TargetToKill < 0 ? -1 : m_TargetToKill); }
+	virtual void DisableTargetToKill() { m_TargetToKill = -2; }
+	virtual int GetTargetToKillCoolDown() { return m_TargetToKillCoolDown; }
 	virtual int GetHeroGiftCoolDown() { return m_HeroGiftCooldown; }
 	virtual void FlagCollected(); // Triggers global gift cooldown
 /* INFECTION MODIFICATION END *****************************************/
@@ -400,6 +389,7 @@ public:
 	void AddSpectatorCID(int ClientID);
 	void RemoveSpectatorCID(int ClientID);
 	bool IsSpectatorCID(int ClientID);
+	bool CanJoinSpec(int ClientID);
 	std::ofstream fout;
 	// InfClassR end
 	bool IsVersionBanned(int Version);

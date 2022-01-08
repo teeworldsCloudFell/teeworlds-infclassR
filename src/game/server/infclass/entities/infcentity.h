@@ -24,8 +24,6 @@ public:
 	void SetPos(const vec2 &Position);
 
 protected:
-	virtual bool DoSnapForClient(int SnappingClient);
-
 	int m_Owner = 0;
 };
 

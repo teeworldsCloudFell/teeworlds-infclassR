@@ -2,7 +2,6 @@
 
 #include <base/system.h>
 #include <game/gamecore.h>
-#include <game/server/gamecontext.h>
 #include <game/server/infclass/entities/infccharacter.h>
 #include <game/server/infclass/infcplayer.h>
 #include <game/server/teeinfo.h>
@@ -58,7 +57,7 @@ const CConfig *CInfClassPlayerClass::Config() const
 	return nullptr;
 }
 
-IServer *CInfClassPlayerClass::Server() const
+IServer *CInfClassPlayerClass::Server()
 {
 	if(m_pPlayer)
 		return m_pPlayer->Server();
@@ -119,14 +118,12 @@ void CInfClassPlayerClass::SetCharacter(CInfClassCharacter *character)
 	if(m_pCharacter)
 	{
 		DestroyChildEntities();
-		m_pCharacter->SetClass(nullptr);
 	}
 
 	m_pCharacter = character;
 
 	if(m_pCharacter)
 	{
-		m_pCharacter->SetClass(this);
 		GiveClassAttributes();
 	}
 }
@@ -170,8 +167,10 @@ void CInfClassPlayerClass::OnPlayerClassChanged()
 {
 	UpdateSkin();
 
-	// Enable hook protection by default for both infected and humans on class changed
-	m_pPlayer->HookProtection(true);
+	if(m_pCharacter)
+	{
+		GiveClassAttributes();
+	}
 }
 
 void CInfClassPlayerClass::PrepareToDie(int Killer, int Weapon, bool *pRefusedToDie)
@@ -201,7 +200,7 @@ void CInfClassPlayerClass::OnCharacterTick()
 			m_Poison--;
 			vec2 Force(0, 0);
 			static const int PoisonDamage = 1;
-			m_pCharacter->TakeDamage(Force, PoisonDamage, m_PoisonFrom, WEAPON_HAMMER, TAKEDAMAGEMODE::NOINFECTION);
+			m_pCharacter->TakeDamage(Force, PoisonDamage, m_PoisonFrom, WEAPON_HAMMER, TAKEDAMAGEMODE_NOINFECTION);
 			if(m_Poison > 0)
 			{
 				m_PoisonTick = Server()->TickSpeed()/2;
@@ -220,7 +219,7 @@ void CInfClassPlayerClass::OnCharacterSnap(int SnappingClient)
 {
 }
 
-void CInfClassPlayerClass::OnCharacterSpawned(const SpawnContext &Context)
+void CInfClassPlayerClass::OnCharacterSpawned()
 {
 	m_Poison = 0;
 
@@ -230,11 +229,6 @@ void CInfClassPlayerClass::OnCharacterSpawned(const SpawnContext &Context)
 
 void CInfClassPlayerClass::OnCharacterDeath(int Weapon)
 {
-	if(m_pCharacter->m_Core.m_Passenger)
-	{
-		m_pCharacter->m_Core.SetPassenger(nullptr);
-	}
-
 	DestroyChildEntities();
 }
 
@@ -295,11 +289,6 @@ void CInfClassPlayerClass::OnFloatingPointCollected(int Points)
 
 void CInfClassPlayerClass::GiveClassAttributes()
 {
-	if(!m_pCharacter)
-	{
-		return;
-	}
-
 	m_pCharacter->TakeAllWeapons();
 }
 

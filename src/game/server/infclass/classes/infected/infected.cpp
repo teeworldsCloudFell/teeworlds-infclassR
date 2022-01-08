@@ -3,7 +3,6 @@
 #include <engine/shared/config.h>
 #include <game/server/gamecontext.h>
 #include <game/server/infclass/entities/infccharacter.h>
-#include <game/server/infclass/infcgamecontroller.h>
 #include <game/server/infclass/infcplayer.h>
 #include <game/server/teeinfo.h>
 
@@ -12,17 +11,6 @@ MACRO_ALLOC_POOL_ID_IMPL(CInfClassInfected, MAX_CLIENTS)
 CInfClassInfected::CInfClassInfected(CInfClassPlayer *pPlayer)
 	: CInfClassPlayerClass(pPlayer)
 {
-}
-
-CInfClassInfected *CInfClassInfected::GetInstance(CInfClassCharacter *pCharacter)
-{
-	CInfClassPlayerClass *pClass = pCharacter ? pCharacter->GetClass() : nullptr;
-	if(pClass && pClass->IsZombie())
-	{
-		return static_cast<CInfClassInfected*>(pClass);
-	}
-	
-	return nullptr;
 }
 
 int CInfClassInfected::GetDefaultEmote() const
@@ -36,16 +24,7 @@ int CInfClassInfected::GetDefaultEmote() const
 		EmoteNormal = EMOTE_SURPRISE;
 
 	if(m_pCharacter->IsFrozen())
-	{
-		if(m_pCharacter->GetFreezeReason() == FREEZEREASON_UNDEAD)
-		{
-			EmoteNormal = EMOTE_PAIN;
-		}
-		else
-		{
-			EmoteNormal = EMOTE_BLINK;
-		}
-	}
+		EmoteNormal = EMOTE_PAIN;
 
 	return EmoteNormal;
 }
@@ -60,11 +39,6 @@ bool CInfClassInfected::CanDie() const
 	}
 
 	return true;
-}
-
-bool CInfClassInfected::CanBeUnfreezed() const
-{
-	return Server()->Tick() > m_LaserWallTick + 1;
 }
 
 void CInfClassInfected::OnCharacterPreCoreTick()
@@ -128,50 +102,30 @@ void CInfClassInfected::OnCharacterTick()
 	}
 }
 
-void CInfClassInfected::OnCharacterSpawned(const SpawnContext &Context)
+void CInfClassInfected::OnCharacterSpawned()
 {
-	CInfClassPlayerClass::OnCharacterSpawned(Context);
+	CInfClassPlayerClass::OnCharacterSpawned();
 
 	m_SlimeHealTick = 0;
-	m_LaserWallTick = 0;
-
-	if(Context.SpawnType == SpawnContext::MapSpawn)
-	{
-		m_pCharacter->GrantSpawnProtection();
-	}
-}
-
-void CInfClassInfected::OnCharacterDeath(int Weapon)
-{
-	CInfClassPlayerClass::OnCharacterDeath(Weapon);
-
-	if(GetPlayerClass() == PLAYERCLASS_GHOUL)
-	{
-		IncreaseGhoulLevel(-20);
-		UpdateSkin();
-	}
-
-	if(GetPlayerClass() == PLAYERCLASS_BOOMER)
-	{
-		if(!m_pCharacter->IsFrozen() && Weapon != WEAPON_GAME && !(m_pCharacter->IsInLove() && Weapon == WEAPON_SELF))
-		{
-			GameServer()->CreateSound(GetPos(), SOUND_GRENADE_EXPLODE);
-			GameController()->CreateExplosionDisk(GetPos(), 60.0f, 80.5f, 14, 52.0f, m_pPlayer->GetCID(), WEAPON_HAMMER, TAKEDAMAGEMODE::INFECTION);
-		}
-	}
 }
 
 void CInfClassInfected::GiveClassAttributes()
 {
-	if(!m_pCharacter)
-	{
-		return;
-	}
-
 	CInfClassPlayerClass::GiveClassAttributes();
 
 	m_pCharacter->GiveWeapon(WEAPON_HAMMER, -1);
 	m_pCharacter->SetActiveWeapon(WEAPON_HAMMER);
+
+	if (GameServer()->GetZombieCount() <= 1)
+	{
+		/* Lonely zombie */
+		m_pCharacter->IncreaseArmor(10);
+	}
+
+	if(m_pCharacter->CanOpenPortals())
+	{
+		m_pCharacter->GiveWeapon(WEAPON_LASER, -1);
+	}
 
 	m_VoodooAboutToDie = false;
 	m_VoodooTimeAlive = Server()->TickSpeed()*Config()->m_InfVoodooAliveTime;
@@ -228,7 +182,7 @@ void CInfClassInfected::SetupSkin(CTeeInfo *output)
 			output->SetSkinName("cammo");
 			output->m_UseCustomColor = 1;
 			{
-				int Hue = 58 * (1.0f - GetGhoulPercent() * 0.8f);
+				int Hue = 58 * (1.0f - GetGhoulPercent());
 				output->m_ColorBody = (Hue<<16) + (255<<8);
 			}
 			output->m_ColorFeet = 65414;
@@ -284,12 +238,39 @@ void CInfClassInfected::BroadcastWeaponState()
 	{
 		if(m_pPlayer->GetGhoulLevel())
 		{
-			float FodderInStomach = GetGhoulPercent();
+			float FodderInStomach = m_pPlayer->GetGhoulPercent();
 			GameServer()->SendBroadcast_Localization(GetCID(), BROADCAST_PRIORITY_WEAPONSTATE,
 				BROADCAST_DURATION_REALTIME,
 				_("Stomach filled by {percent:FodderInStomach}"),
 				"FodderInStomach", &FodderInStomach,
 				NULL
+			);
+		}
+	}
+	else if(GetPlayerClass() == PLAYERCLASS_WITCH)
+	{
+		if (m_pCharacter->hasPortalIn() && m_pCharacter->hasPortalOut())
+		{
+			GameServer()->SendBroadcast_Localization(GetCID(), BROADCAST_PRIORITY_WEAPONSTATE,
+				BROADCAST_DURATION_REALTIME,
+				_("The portals system is active!"),
+				nullptr
+			);
+		}
+		else if (m_pCharacter->hasPortalIn())
+		{
+			GameServer()->SendBroadcast_Localization(GetCID(), BROADCAST_PRIORITY_WEAPONSTATE,
+				BROADCAST_DURATION_REALTIME,
+				_("The IN portal is open"),
+				nullptr
+			);
+		}
+		else if (m_pCharacter->hasPortalOut())
+		{
+			GameServer()->SendBroadcast_Localization(GetCID(), BROADCAST_PRIORITY_WEAPONSTATE,
+				BROADCAST_DURATION_REALTIME,
+				_("The OUT portal is open"),
+				nullptr
 			);
 		}
 	}
@@ -306,14 +287,14 @@ void CInfClassInfected::SetHookOnLimit(bool OnLimit)
 
 void CInfClassInfected::OnSlimeEffect(int Owner)
 {
+	if(GetPlayerClass() == PLAYERCLASS_SLUG)
+		return;
+
 	m_pCharacter->SetEmote(EMOTE_HAPPY, Server()->Tick());
 	if(Server()->Tick() >= m_SlimeHealTick + (Server()->TickSpeed() / Config()->m_InfSlimeHealRate))
 	{
-		if(m_pCharacter->GetHealthArmorSum() < Config()->m_InfSlimeMaxHeal)
-		{
-			m_pCharacter->IncreaseOverallHp(1);
-		}
 		m_SlimeHealTick = Server()->Tick();
+		m_pCharacter->IncreaseHealth(1);
 	}
 }
 
@@ -324,11 +305,6 @@ void CInfClassInfected::OnFloatingPointCollected(int Points)
 
 	m_pCharacter->IncreaseOverallHp(4);
 	IncreaseGhoulLevel(Points);
-}
-
-void CInfClassInfected::OnLaserWall()
-{
-	m_LaserWallTick = Server()->Tick();
 }
 
 float CInfClassInfected::GetGhoulPercent() const
@@ -348,18 +324,6 @@ int CInfClassInfected::GetGhoulLevel() const
 
 void CInfClassInfected::PrepareToDie(int Killer, int Weapon, bool *pRefusedToDie)
 {
-	if((Killer == GetCID()) && (Weapon == WEAPON_SELF))
-	{
-		// Accept the death to go with the default self kill routine
-		return;
-	}
-
-	if(m_pCharacter->IsInvincible())
-	{
-		*pRefusedToDie = true;
-		return;
-	}
-
 	// Start counting down, delay killer message for later
 	if(GetPlayerClass() == PLAYERCLASS_VOODOO)
 	{

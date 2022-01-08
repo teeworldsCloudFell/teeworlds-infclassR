@@ -9,7 +9,7 @@
 #include "infccharacter.h"
 
 CMercenaryBomb::CMercenaryBomb(CGameContext *pGameContext, vec2 Pos, int Owner)
-	: CPlacedObject(pGameContext, CGameWorld::ENTTYPE_MERCENARY_BOMB, Pos, Owner)
+	: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_MERCENARY_BOMB, Pos, Owner)
 {
 	GameWorld()->InsertEntity(this);
 	m_LoadingTick = Server()->TickSpeed();
@@ -69,7 +69,7 @@ void CMercenaryBomb::Explode()
 	if(m_Damage > 1)
 	{
 		GameServer()->CreateSound(m_Pos, SOUND_GRENADE_EXPLODE);
-		new CGrowingExplosion(GameServer(), m_Pos, vec2(0.0, -1.0), m_Owner, 16.0f * Factor, GROWINGEXPLOSIONEFFECT_BOOM_INFECTED, TAKEDAMAGEMODE::SELFHARM);
+		new CGrowingExplosion(GameServer(), m_Pos, vec2(0.0, -1.0), m_Owner, 16.0f * Factor, GROWINGEXPLOSIONEFFECT_BOOM_INFECTED, TAKEDAMAGEMODE_SELFHARM);
 	}
 				
 	GameServer()->m_World.DestroyEntity(this);
@@ -82,7 +82,7 @@ bool CMercenaryBomb::ReadyToExplode()
 
 void CMercenaryBomb::Snap(int SnappingClient)
 {
-	if(!DoSnapForClient(SnappingClient))
+	if(NetworkClipped(SnappingClient))
 		return;
 
 	//CPlayer* pClient = GameServer()->m_apPlayers[SnappingClient];

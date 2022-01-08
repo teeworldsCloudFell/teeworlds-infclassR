@@ -2,8 +2,6 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "gamecore.h"
 
-#include "collision.h"
-
 #include <engine/shared/config.h>
 
 const char *CTuningParams::ms_apNames[] =
@@ -106,6 +104,20 @@ void CCharacterCore::Tick(bool UseInput, CParams* pParams)
 	float MaxSpeed = Grounded ? pTuningParams->m_GroundControlSpeed : pTuningParams->m_AirControlSpeed;
 	float Accel = Grounded ? pTuningParams->m_GroundControlAccel : pTuningParams->m_AirControlAccel;
 	float Friction = Grounded ? pTuningParams->m_GroundFriction : pTuningParams->m_AirFriction;
+
+	// InfClassR taxi mode, todo: cleanup & move out from core
+	if (m_Passenger && (m_Passenger->m_Input.m_Jump > 0))
+	{
+		SetPassenger(nullptr);
+	}
+
+	if (m_Passenger) {
+		m_Passenger->m_Vel = m_Vel;
+		if (abs(m_Passenger->m_Vel.y) <= 1.0f)
+			m_Passenger->m_Vel.y = 0.0f;
+		m_Passenger->m_Pos.x = m_Pos.x;
+		m_Passenger->m_Pos.y = m_Pos.y + PassengerYOffset;
+	}
 
 	if (m_ProbablyStucked) {
 		m_Pos.y += 1;
@@ -235,7 +247,7 @@ void CCharacterCore::Tick(bool UseInput, CParams* pParams)
 			for(int i = 0; i < MAX_CLIENTS; i++)
 			{
 				CCharacterCore *pCharCore = m_pWorld->m_apCharacters[i];
-				if (IsRecursePassenger(pCharCore))
+				if (IsChildCharacter(pCharCore, this))
 					continue;
 				if(!pCharCore || pCharCore == this || (pCharCore->m_HookProtected && (m_Infected == pCharCore->m_Infected)) || m_IsPassenger || m_Passenger == pCharCore)
 					continue;
@@ -366,7 +378,7 @@ void CCharacterCore::Tick(bool UseInput, CParams* pParams)
 					m_Vel.y = SaturatedAdd(-DragSpeed, DragSpeed, m_Vel.y, -Accel*Dir.y*0.25f);
 
 					// InfClassR taxi mode, todo: cleanup
-					if (!pCharCore->m_Passenger && (!m_Infected && !pCharCore->m_Infected && !m_HookProtected) && !IsRecursePassenger(pCharCore)) {
+					if (!pCharCore->m_Passenger && (!m_Infected && !pCharCore->m_Infected && !m_HookProtected) && !IsChildCharacter(pCharCore, this)) {
 						pCharCore->SetPassenger(this);
 						m_HookedPlayer = -1;
 						m_HookState = HOOK_RETRACTED;
@@ -399,8 +411,6 @@ void CCharacterCore::Tick(bool UseInput, CParams* pParams)
 	// clamp the velocity to something sane
 	if(length(m_Vel) > 6000)
 		m_Vel = normalize(m_Vel) * 6000;
-
-	UpdateTaxiPassengers();
 }
 
 void CCharacterCore::Move(CParams* pParams)
@@ -496,19 +506,13 @@ void CCharacterCore::Quantize()
 	Read(&Core);
 }
 
-bool CCharacterCore::IsRecursePassenger(CCharacterCore *pMaybePassenger) const
-{
-	if(m_Passenger)
-	{
-		if(m_Passenger == pMaybePassenger)
-		{
+bool CCharacterCore::IsChildCharacter(CCharacterCore *suspect, CCharacterCore *me) {
+	if (me->m_Passenger) {
+		if (me->m_Passenger == suspect)
 			return true;
-		}
-
-		return m_Passenger->IsRecursePassenger(pMaybePassenger);
+		else return IsChildCharacter(suspect, me->m_Passenger);
 	}
-
-	return false;
+	else return false;
 }
 
 void CCharacterCore::SetPassenger(CCharacterCore *pPassenger)
@@ -531,36 +535,4 @@ void CCharacterCore::SetPassenger(CCharacterCore *pPassenger)
 void CCharacterCore::EnableJump()
 {
 	m_Jumped &= ~2;
-}
-
-void CCharacterCore::UpdateTaxiPassengers()
-{
-	// InfClassR taxi mode, todo: cleanup & move out from core
-	if(m_Passenger && ((m_Passenger->m_Input.m_Jump > 0) || (!m_Passenger->m_IsPassenger)))
-	{
-		SetPassenger(nullptr);
-	}
-
-	if(m_IsPassenger)
-	{
-		// Do nothing
-	}
-	else
-	{
-		int PassengerNumber = 0;
-		CCharacterCore *pPassenger = m_Passenger;
-		while(pPassenger)
-		{
-			++PassengerNumber;
-
-			pPassenger->m_Vel = m_Vel;
-			if(abs(pPassenger->m_Vel.y) <= 1.0f)
-				pPassenger->m_Vel.y = 0.0f;
-
-			pPassenger->m_Pos.x = m_Pos.x;
-			pPassenger->m_Pos.y = m_Pos.y + PassengerYOffset * PassengerNumber;
-
-			pPassenger = pPassenger->m_Passenger;
-		}
-	}
 }

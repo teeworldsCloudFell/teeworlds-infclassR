@@ -9,7 +9,7 @@
 #include "growingexplosion.h"
 
 CScientistMine::CScientistMine(CGameContext *pGameContext, vec2 Pos, int Owner)
-	: CPlacedObject(pGameContext, CGameWorld::ENTTYPE_SCIENTIST_MINE, Pos, Owner)
+	: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_SCIENTIST_MINE, Pos, Owner)
 {
 	GameWorld()->InsertEntity(this);
 	m_DetectionRadius = 60.0f;
@@ -40,20 +40,17 @@ void CScientistMine::Explode(int DetonatedBy)
 	{
 		float Dist = distance(m_Pos, OwnerChar->GetPos());
 		if(Dist < OwnerChar->GetProximityRadius()+Config()->m_InfMineRadius)
-			OwnerChar->TakeDamage(vec2(0.0f, 0.0f), 4, DetonatedBy, WEAPON_HAMMER, TAKEDAMAGEMODE::SELFHARM);
+			OwnerChar->TakeDamage(vec2(0.0f, 0.0f), 4, DetonatedBy, WEAPON_HAMMER, TAKEDAMAGEMODE_SELFHARM);
 		else if(Dist < OwnerChar->GetProximityRadius()+2*Config()->m_InfMineRadius)
 		{
 			float Alpha = (Dist - Config()->m_InfMineRadius-OwnerChar->GetProximityRadius())/Config()->m_InfMineRadius;
-			OwnerChar->TakeDamage(vec2(0.0f, 0.0f), 4*Alpha, DetonatedBy, WEAPON_HAMMER, TAKEDAMAGEMODE::SELFHARM);
+			OwnerChar->TakeDamage(vec2(0.0f, 0.0f), 4*Alpha, DetonatedBy, WEAPON_HAMMER, TAKEDAMAGEMODE_SELFHARM);
 		}
 	}
 }
 
 void CScientistMine::Snap(int SnappingClient)
 {
-	if(!DoSnapForClient(SnappingClient))
-		return;
-
 	float Radius = Config()->m_InfMineRadius;
 	
 	int NumSide = CScientistMine::NUM_SIDE;

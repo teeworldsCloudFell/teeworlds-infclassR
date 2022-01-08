@@ -3,32 +3,30 @@
 #ifndef GAME_SERVER_ENTITIES_SOLDIER_BOMB_H
 #define GAME_SERVER_ENTITIES_SOLDIER_BOMB_H
 
-#include "infc-placed-object.h"
+#include "infcentity.h"
 
 #include <base/tl/array.h>
 
-class CSoldierBomb : public CPlacedObject
+class CSoldierBomb : public CInfCEntity
 {
 public:
 	CSoldierBomb(CGameContext *pGameContext, vec2 Pos, int Owner);
-	~CSoldierBomb() override;
+	virtual ~CSoldierBomb();
 
-	void Snap(int SnappingClient) override;
-	void Tick() override;
-	void TickPaused() override;
-
+	virtual void Snap(int SnappingClient);
+	virtual void TickPaused();
 	void Explode();
 	bool AddBomb();
-	int GetNbBombs() const { return m_nbBomb; }
+	int GetNbBombs() { return m_nbBomb; }
 
 private:
-	void ChargeBomb(float time);
-
+	virtual void ChargeBomb(float time);
 	int m_StartTick;
-	float m_Angle = 0;
 	array<int> m_IDBomb;
 	int m_nbBomb;
-	int m_ChargedBomb;
+	int charged_bomb;
+	
+public:
 	float m_DetectionRadius;
 };
 

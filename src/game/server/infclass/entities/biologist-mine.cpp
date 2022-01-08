@@ -8,7 +8,7 @@
 #include "infccharacter.h"
 
 CBiologistMine::CBiologistMine(CGameContext *pGameContext, vec2 Pos, vec2 EndPos, int Owner)
-	: CPlacedObject(pGameContext, CGameWorld::ENTTYPE_BIOLOGIST_MINE, Pos, Owner)
+	: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_BIOLOGIST_MINE, Pos, Owner)
 {
 	m_EndPos = EndPos;
 	GameWorld()->InsertEntity(this);
@@ -41,9 +41,6 @@ void CBiologistMine::Explode()
 
 void CBiologistMine::Snap(int SnappingClient)
 {
-	if(!DoSnapForClient(SnappingClient))
-		return;
-
 	float AngleStep = 2.0f * pi / CBiologistMine::NUM_SIDE;
 	float Radius = 32.0f;
 	for(int i=0; i<CBiologistMine::NUM_SIDE; i++)

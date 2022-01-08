@@ -3,9 +3,9 @@
 #ifndef GAME_SERVER_ENTITIES_MERCENARY_BOMB_H
 #define GAME_SERVER_ENTITIES_MERCENARY_BOMB_H
 
-#include "infc-placed-object.h"
+#include "infcentity.h"
 
-class CMercenaryBomb : public CPlacedObject
+class CMercenaryBomb : public CInfCEntity
 {
 public:
 	enum

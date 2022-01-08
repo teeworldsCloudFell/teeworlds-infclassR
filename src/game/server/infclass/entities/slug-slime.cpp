@@ -13,6 +13,7 @@ CSlugSlime::CSlugSlime(CGameContext *pGameContext, vec2 Pos, int Owner)
 {
 	m_LifeSpan = Server()->TickSpeed()*Config()->m_InfSlimeDuration;
 	GameWorld()->InsertEntity(this);
+	m_HealTick = 0;
 }
 
 void CSlugSlime::Tick()
@@ -34,7 +35,7 @@ void CSlugSlime::Tick()
 		p->GetClass()->OnSlimeEffect(m_Owner);
 	}
 	
-	if((m_LifeSpan % 20) == 0)
+	if(random_prob(0.2f))
 	{
 		GameServer()->CreateDeath(m_Pos, m_Owner);
 	}

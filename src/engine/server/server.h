@@ -234,7 +234,7 @@ public:
 	int Init();
 
 	void SetRconCID(int ClientID);
-	int GetAuthedState(int ClientID) const;
+	bool IsAuthed(int ClientID) const;
 	int GetClientInfo(int ClientID, CClientInfo *pInfo) const;
 	void GetClientAddr(int ClientID, char *pAddrStr, int Size) const;
 	std::string GetClientIP(int ClientID) const;
@@ -266,8 +266,8 @@ public:
 
 	void ProcessClientPacket(CNetChunk *pPacket);
 
-	void SendServerInfo(const NETADDR *pAddr, int Token, int Type, bool SendClients);
-	void SendServerInfoConnless(const NETADDR *pAddr, int Token, int Type);
+	void SendServerInfoConnless(const NETADDR *pAddr, int Token, bool Extended = false);
+	void SendServerInfo(const NETADDR *pAddr, int Token, bool Extended=false, bool SendClients = true, int Offset=0);
 	void UpdateServerInfo();
 
 	void PumpNetwork();
@@ -359,7 +359,11 @@ public:
 	virtual int GetClientNbRound(int ClientID);
 	
 	virtual int IsClassChooserEnabled();
+	bool GetPlayerClassEnabled(int PlayerClass) const override;
 	void SetPlayerClassEnabled(int PlayerClass, bool Enabled) override;
+	int GetMinPlayersForClass(int PlayerClass) const override;
+	int GetClassPlayerLimit(int PlayerClass) const override;
+	int GetPlayerClassProbability(int PlayerClass) const override;
 	void SetPlayerClassProbability(int PlayerClass, int Probability) override;
 	virtual bool IsClientLogged(int ClientID);
 #ifdef CONF_SQL

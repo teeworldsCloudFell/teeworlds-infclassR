@@ -3,11 +3,9 @@
 #ifndef GAME_SERVER_ENTITIES_TURRET_H
 #define GAME_SERVER_ENTITIES_TURRET_H
 
-#include "infc-placed-object.h"
+#include "infcentity.h"
 
-#include <base/tl/array.h>
-
-class CTurret : public CPlacedObject
+class CTurret : public CInfCEntity
 {
 public:
 	enum Type

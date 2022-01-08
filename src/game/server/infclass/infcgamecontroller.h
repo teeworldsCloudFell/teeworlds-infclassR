@@ -12,9 +12,6 @@ class CGameWorld;
 class CInfClassCharacter;
 class CInfClassPlayer;
 struct CNetObj_GameInfo;
-struct SpawnContext;
-
-enum class TAKEDAMAGEMODE;
 
 using ClientsArray = array_on_stack<int, 64>; // MAX_CLIENTS
 
@@ -40,43 +37,29 @@ public:
 	CPlayer *CreatePlayer(int ClientID) override;
 
 	bool OnEntity(const char* pName, vec2 Pivot, vec2 P0, vec2 P1, vec2 P2, vec2 P3, int PosEnv) override;
-	void HandleCharacterTiles(class CCharacter *pChr);
-	void HandleLastHookers();
+	void HandleCharacterTiles(class CCharacter *pChr) override;
 
 	int GetZoneValueAt(int ZoneHandle, const vec2 &Pos) const;
 	int GetDamageZoneValueAt(const vec2 &Pos) const;
 	int GetBonusZoneValueAt(const vec2 &Pos) const;
 
-	void CreateExplosion(const vec2 &Pos, int Owner, int Weapon, TAKEDAMAGEMODE TakeDamageMode, float DamageFactor = 1.0f);
-	void CreateExplosionDisk(vec2 Pos, float InnerRadius, float DamageRadius, int Damage, float Force, int Owner, int Weapon, TAKEDAMAGEMODE TakeDamageMode);
-
 	int OnCharacterDeath(class CCharacter *pVictim, class CPlayer *pKiller, int Weapon) override;
-	void OnCharacterSpawned(CInfClassCharacter *pCharacter);
+	void OnCharacterSpawn(class CCharacter *pChr) override;
 	void OnPlayerInfoChange(class CPlayer *pP) override;
 	void DoWincheck() override;
 	void StartRound() override;
 	void EndRound() override;
-	bool TryRespawn(CInfClassPlayer *pPlayer, SpawnContext *pContext);
+	bool PreSpawn(CPlayer* pPlayer, vec2 *pPos) override;
 	int ChooseHumanClass(const CPlayer *pPlayer) const;
 	int ChooseInfectedClass(const CPlayer *pPlayer) const override;
-	bool GetPlayerClassEnabled(int PlayerClass) const;
-	int GetMinPlayersForClass(int PlayerClass) const;
-	int GetClassPlayerLimit(int PlayerClass) const;
-	int GetPlayerClassProbability(int PlayerClass) const;
-
-	CLASS_AVAILABILITY GetPlayerClassAvailability(int PlayerClass) const;
+	bool IsEnabledClass(int PlayerClass);
+	CLASS_AVAILABILITY GetPlayerClassAvailability(int PlayerClass);
 	bool CanVote() override;
 	void OnClientDrop(int ClientID, int Type) override;
-	void OnPlayerInfected(CInfClassPlayer *pPlayer, CInfClassPlayer *pInfectiousPlayer, int PreviousClass);
-	bool IsInfectionStarted() const;
-	bool CanJoinTeam(int Team, int ClientID) override;
+	void OnPlayerInfected(CPlayer* pPlayer, CPlayer* pInfectiousPlayer) override;
+	bool IsInfectionStarted() override;
+	bool PortalsAvailableForCharacter(class CCharacter *pCharacter) override;
 	bool AreTurretsEnabled() const;
-
-	int GetTargetToKill() const;
-	void TargetKilled();
-	void EnableTargetToKill() { m_TargetToKill = (m_TargetToKill < 0 ? -1 : m_TargetToKill); }
-	void DisableTargetToKill() { m_TargetToKill = -2; }
-	int GetTargetToKillCoolDown() { return m_TargetToKillCoolDown; }
 
 	void ResetFinalExplosion();
 	void SaveRoundRules();
@@ -108,15 +91,8 @@ public:
 	int GetPlayerOwnCursorID(int ClientID) const;
 
 	void GetSortedTargetsInRange(const vec2 &Center, const float Radius, const ClientsArray &SkipList, ClientsArray *pOutput);
-	int GetMinimumInfected() const;
-
-protected:
-	void TickInfectionStarted();
-	void TickInfectionNotStarted();
 
 private:
-	void HandleTargetsToKill();
-
 	void ReservePlayerOwnSnapItems();
 	void FreePlayerOwnSnapItems();
 
@@ -124,20 +100,16 @@ private:
 	void SnapMapMenu(int SnappingClient, CNetObj_GameInfo *pGameInfoObj);
 	void RewardTheKiller(CInfClassCharacter *pVictim, CInfClassPlayer *pKiller, int Weapon);
 	bool IsSpawnable(vec2 Pos, int TeleZoneIndex) override;
-	void GetPlayerCounter(int ClientException, int& NumHumans, int& NumInfected);
-	int GetMinimumInfectedForPlayers(int PlayersNumber) const;
+	void GetPlayerCounter(int ClientException, int& NumHumans, int& NumInfected, int& NumFirstInfected);
 
 	int RandomZombieToWitch();
-	ClientsArray m_WitchCallers;
+	std::vector<int> m_WitchCallers;
 
 private:
 	int m_MapWidth;
 	int m_MapHeight;
 	int* m_GrowingMap;
 	bool m_ExplosionStarted;
-
-	int m_TargetToKill;
-	int m_TargetToKillCoolDown;
 
 	int m_PlayerOwnCursorID = -1;
 	

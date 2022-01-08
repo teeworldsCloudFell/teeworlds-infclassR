@@ -1,9 +1,9 @@
 #ifndef GAME_SERVER_ENTITIES_LOOPER_WALL_H
 #define GAME_SERVER_ENTITIES_LOOPER_WALL_H
 
-#include "infc-placed-object.h"
+#include "infcentity.h"
 
-class CLooperWall : public CPlacedObject
+class CLooperWall : public CInfCEntity
 {
 public:
 	enum

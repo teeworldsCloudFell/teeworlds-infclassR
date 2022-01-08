@@ -3,14 +3,21 @@
 #ifndef GAME_SERVER_ENTITIES_CHARACTER_H
 #define GAME_SERVER_ENTITIES_CHARACTER_H
 
-#include <base/tl/array.h>
 #include <game/server/entity.h>
+#include <game/server/infclass/entities/hero-flag.h>
 #include <game/generated/server_data.h>
 #include <game/generated/protocol.h>
 
 #include <game/gamecore.h>
 
-class CHeroFlag;
+class CPortal;
+
+enum
+{
+	WEAPON_GAME = -3, // team switching etc
+	WEAPON_SELF = -2, // console kill command
+	WEAPON_WORLD = -1, // death tiles etc
+};
 
 /* INFECTION MODIFICATION START ***************************************/
 enum FREEZEREASON
@@ -23,11 +30,11 @@ enum FREEZEREASON
 #define GHOST_RADIUS 11
 #define GHOST_SEARCHMAP_SIZE (2*GHOST_RADIUS+1)
 
-enum class TAKEDAMAGEMODE
+enum TAKEDAMAGEMODE
 {
-	NOINFECTION=0,
-	INFECTION,
-	SELFHARM, // works like NOINFECTION but also harms the owner of the damage with 50%
+	TAKEDAMAGEMODE_NOINFECTION=0,
+	TAKEDAMAGEMODE_INFECTION,
+	TAKEDAMAGEMODE_SELFHARM, // works like NOINFECTION but also harms the owner of the damage with 50%
 };
 
 /* INFECTION MODIFICATION END *****************************************/
@@ -57,7 +64,7 @@ public:
 	bool IsGrounded();
 
 	void SetWeapon(int W);
-	virtual void HandleWeaponSwitch();
+	void HandleWeaponSwitch();
 	void DoWeaponSwitch();
 
 	void HandleWeapons();
@@ -69,8 +76,10 @@ public:
 	void ResetInput();
 	virtual void FireWeapon();
 
+	bool HasPortal();
+
 	virtual void Die(int Killer, int Weapon);
-	virtual bool TakeDamage(vec2 Force, int Dmg, int From, int Weapon, TAKEDAMAGEMODE Mode);
+	bool TakeDamage(vec2 Force, int Dmg, int From, int Weapon, TAKEDAMAGEMODE Mode);
 
 	bool Spawn(class CPlayer *pPlayer, vec2 Pos);
 	bool Remove();
@@ -115,6 +124,9 @@ protected:
 
 	int m_ReloadTimer;
 	int m_AttackTick;
+
+	bool m_NeedFullHeal;
+	int m_DamageTaken;
 
 	int m_EmoteType;
 	int m_EmoteStop;
@@ -193,26 +205,32 @@ protected:
 	vec2 m_SpawnPosition;
 
 	CHeroFlag* m_pHeroFlag;
+	bool m_canOpenPortals = false;
+	CPortal *m_pPortalIn = nullptr;
+	CPortal *m_pPortalOut = nullptr;
 
 public:
+	int m_PositionLockTick;
+	bool m_PositionLocked;
+	bool m_PositionLockAvailable;
 	bool m_HasWhiteHole;
 	bool m_HasIndicator;
+	bool m_HasStunGrenade;
 	int m_BroadcastWhiteHoleReady; // used to broadcast "WhiteHole ready" for a short period of time
 	int m_LoveTick;
 	int m_HallucinationTick;
 	int m_SlipperyTick;
 	int m_SlowMotionTick; //LooperClass changes here
 	int m_LastFreezer;
-	int m_LastHooker;
-	int m_LastHookerTick;
-	int m_LastEnforcer;
-	int m_LastEnforcerWeapon;
-	int m_LastEnforcerTick;
 	int m_HookMode;
 	int m_InWater;
+	int m_NinjaLevel = 0;
 	int m_NinjaVelocityBuff;
 	int m_NinjaStrengthBuff;
 	int m_NinjaAmmoBuff;
+	int m_NinjaAmmoRegenReduction = 0;
+	int m_NinjaExtraDarts = 0;
+	int m_NinjaExtraFlashRadius = 0;
 	int m_RefreshTime;
 	//Mercenary
 	int m_TurretCount;
@@ -220,26 +238,32 @@ public:
 
 public:
 	void DestroyChildEntities();
-	void FreeChildSnapIDs();
+	void ClassSpawnAttributes();
 	vec2 GetDirection() const;
 	int GetPlayerClass() const;
 
 	bool IsZombie() const;
 	bool IsHuman() const;
+	void RemoveAllGun();
 	void SetAntiFire();
 	void Freeze(float Time, int Player, FREEZEREASON Reason);
 	bool IsFrozen() const;
 	bool IsInSlowMotion() const; //LooperClass changes here
 	void SlowMotionEffect(float duration);	//LooperClass changes here
 	void Unfreeze();
-	virtual void TryUnfreeze() = 0;
 	bool IsInLove() const;
 	void LoveEffect();
 	void HallucinationEffect();
 	void SlipperyEffect();
+	void GrantSpawnProtection();
 	int GetInfWeaponID(int WID) const;
 	bool FindPortalPosition(vec2 Pos, vec2& Res);
 	bool FindWitchSpawnPosition(vec2& Res);
+	void SaturateVelocity(vec2 Force, float MaxSpeed);
+	bool HasPassenger() const;
+	CCharacter *GetPassenger();
+	int GetInfZoneTick();
+
 /* INFECTION MODIFICATION END *****************************************/
 
 	CCharacterCore *Core() { return &m_Core; }

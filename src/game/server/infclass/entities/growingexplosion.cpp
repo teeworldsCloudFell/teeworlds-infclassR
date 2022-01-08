@@ -5,9 +5,9 @@
 
 #include <game/server/gamecontext.h>
 #include <game/server/infclass/classes/infcplayerclass.h>
-#include <game/server/infclass/infcgamecontroller.h>
 
 #include "infccharacter.h"
+#include "portal.h"
 
 CGrowingExplosion::CGrowingExplosion(CGameContext *pGameContext, vec2 Pos, vec2 Dir, int Owner, int Radius, int ExplosionEffect, TAKEDAMAGEMODE TakeDamageMode)
 		: CInfCEntity(pGameContext, CGameWorld::ENTTYPE_GROWINGEXPLOSION, Pos, Owner),
@@ -109,6 +109,23 @@ CGrowingExplosion::~CGrowingExplosion()
 	}
 }
 
+void CGrowingExplosion::DamagePortals()
+{
+	const int tick = Server()->Tick();
+	for(CPortal* pPortal = (CPortal*) GameWorld()->FindFirst(CGameWorld::ENTTYPE_PORTAL); pPortal; pPortal = (CPortal*) pPortal->TypeNext())
+	{
+		const float d = distance(m_SeedPos, pPortal->m_Pos);
+		if(d > (pPortal->m_ProximityRadius + m_MaxGrowing))
+			continue;
+
+		int Damage = GetActualDamage();
+		if(Damage)
+		{
+			pPortal->TakeDamage(Damage, m_Owner, WEAPON_HAMMER, m_TakeDamageMode);
+		}
+	}
+}
+
 void CGrowingExplosion::Tick()
 {
 	if(m_MarkedForDestroy) return;
@@ -122,6 +139,7 @@ void CGrowingExplosion::Tick()
 	}
 	
 	bool NewTile = false;
+	static const bool c_DontDamage = true;
 	
 	for(int j=0; j<m_GrowingMap_Length; j++)
 	{
@@ -166,9 +184,9 @@ void CGrowingExplosion::Tick()
 							}
 							break;
 						case GROWINGEXPLOSIONEFFECT_BOOM_INFECTED:
-							if(random_prob(0.2f))
+							if (random_prob(0.2f))
 							{
-								GameController()->CreateExplosion(TileCenter, m_Owner, WEAPON_HAMMER, m_TakeDamageMode);
+								GameServer()->CreateExplosion(TileCenter, m_Owner, WEAPON_HAMMER, false, m_TakeDamageMode);
 							}
 							break;
 						case GROWINGEXPLOSIONEFFECT_ELECTRIC_INFECTED:
@@ -212,6 +230,9 @@ void CGrowingExplosion::Tick()
 									GameServer()->CreateSound(EndPoint, SOUND_LASER_BOUNCE);
 								}
 							}
+							break;
+						case GROWINGEXPLOSIONEFFECT_HIT_EFFECT:
+							GameServer()->CreateExplosion(TileCenter, m_Owner, WEAPON_HAMMER, c_DontDamage);
 							break;
 					}
 				}
@@ -312,6 +333,16 @@ void CGrowingExplosion::Tick()
 		}
 	}
 
+	switch(m_ExplosionEffect)
+	{
+		case GROWINGEXPLOSIONEFFECT_ELECTRIC_INFECTED:
+		case GROWINGEXPLOSIONEFFECT_BOOM_INFECTED:
+			DamagePortals();
+			break;
+		default:
+			break;
+	}
+	
 	// clean slug slime
 	if (m_ExplosionEffect == GROWINGEXPLOSIONEFFECT_FREEZE_INFECTED) 
 	{

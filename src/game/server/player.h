@@ -3,22 +3,12 @@
 #ifndef GAME_SERVER_PLAYER_H
 #define GAME_SERVER_PLAYER_H
 
-#include <game/gamecore.h>
-#include <game/server/alloc.h>
+// this include should perhaps be removed
+#include "entities/character.h"
+#include "gamecontext.h"
 #include <game/server/classes.h>
-#include <game/server/teeinfo.h>
 
-class CCharacter;
-class CGameContext;
-class IServer;
-struct CNetObj_PlayerInput;
-
-enum
-{
-	WEAPON_GAME = -3, // team switching etc
-	WEAPON_SELF = -2, // console kill command
-	WEAPON_WORLD = -1, // death tiles etc
-};
+#include "teeinfo.h"
 
 // player object
 class CPlayer
@@ -43,7 +33,6 @@ public:
 	virtual void Tick();
 	void PostTick();
 	void Snap(int SnappingClient);
-	void SnapClientInfo(int SnappingClient);
 
 	void OnDirectInput(CNetObj_PlayerInput *NewInput);
 	void OnPredictedInput(CNetObj_PlayerInput *NewInput);
@@ -85,7 +74,6 @@ public:
 	int m_LastChangeInfo;
 	int m_LastEmote;
 	int m_LastKill;
-	int m_LastWhisperTo;
 
 	int m_ClientVersion;
 
@@ -104,6 +92,8 @@ public:
 		int m_TargetX;
 		int m_TargetY;
 	} m_LatestActivity;
+
+	int m_LastWhisperId;
 
 	// network latency calculations
 	struct
@@ -150,7 +140,13 @@ protected:
 	int m_ScoreMode;
 	int m_DefaultScoreMode;
 	char m_aLanguage[16];
-
+	
+	int m_MapMenu;
+	int m_MapMenuTick;
+	
+	int m_GhoulLevel;
+	int m_GhoulLevelTick;
+	
 	int m_NumberKills;
 
 public:
@@ -159,6 +155,8 @@ public:
 	int m_HumanTime;
 	
 	bool m_knownClass[NB_PLAYERCLASS];
+	bool m_DoInfection = false;
+	int m_InfectiousPlayerCID = -1;
 
 	int m_InfectionTick;
 	
@@ -175,6 +173,8 @@ public:
 	bool IsActuallyZombie() const;
 	bool IsHuman() const;
 	bool IsSpectator() const;
+	void Infect(CPlayer* pInfectiousPlayer);
+	void StartInfection(bool force = false, CPlayer* pInfectiousPlayer = nullptr);
 	bool IsKnownClass(int c);
 	
 	const char* GetLanguage();
@@ -184,10 +184,22 @@ public:
 	bool m_HookProtection;
 	bool m_HookProtectionAutomatic;
 	
+	int m_MapMenuItem;
+	
 	CTuningParams m_PrevTuningParams;
 	CTuningParams m_NextTuningParams;
 	
 	void HandleTuningParams();
+	
+	bool InscoreBoard() { return m_PlayerFlags & PLAYERFLAG_SCOREBOARD; };
+	int MapMenu() { return (m_Team != TEAM_SPECTATORS) ? m_MapMenu : 0; };
+	void OpenMapMenu(int Menu);
+	void CloseMapMenu();
+	bool MapMenuClickable();
+	
+	float GetGhoulPercent() const;
+	void IncreaseGhoulLevel(int Diff);
+	inline int GetGhoulLevel() const { return m_GhoulLevel; }
 	
 	int m_LastHumanClasses[2];
 

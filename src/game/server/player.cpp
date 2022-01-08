@@ -7,7 +7,6 @@
 #include <engine/shared/network.h>
 #include <engine/server/roundstatistics.h>
 
-#include <game/server/gamecontext.h>
 
 MACRO_ALLOC_POOL_ID_IMPL(CPlayer, MAX_CLIENTS)
 
@@ -38,10 +37,10 @@ void CPlayer::Reset()
 	m_LastActionMoveTick = Server()->Tick();
 	m_TeamChangeTick = Server()->Tick();
 	m_ClientVersion = 0;
+	m_LastWhisperId = -1;
 
 	m_LastEyeEmote = 0;
 	m_DefEmote = EMOTE_NORMAL;
-	m_LastWhisperTo = -1;
 	m_OverrideEmote = 0;
 	m_OverrideEmoteReset = -1;
 
@@ -67,6 +66,9 @@ void CPlayer::Reset()
 		idMap[0] = m_ClientID;
 	}
 
+	m_MapMenu = 0;
+	m_MapMenuItem = -1;
+	m_MapMenuTick = -1;
 	m_HookProtectionAutomatic = true;
 
 	m_PrevTuningParams = *m_pGameServer->Tuning();
@@ -208,8 +210,13 @@ void CPlayer::Snap(int SnappingClient)
 	if(SnappingClient != DemoClientID && !Server()->Translate(id, SnappingClient))
 		return;
 
-	SnapClientInfo(SnappingClient);
+	CNetObj_ClientInfo *pClientInfo = static_cast<CNetObj_ClientInfo *>(Server()->SnapNewItem(NETOBJTYPE_CLIENTINFO, id, sizeof(CNetObj_ClientInfo)));
 
+	if(!pClientInfo)
+		return;
+
+	StrToInts(&pClientInfo->m_Name0, 4, Server()->ClientName(m_ClientID));
+	
 	int SnapScoreMode = PLAYERSCOREMODE_SCORE;
 	if(GameServer()->GetPlayer(SnappingClient))
 	{
@@ -218,7 +225,8 @@ void CPlayer::Snap(int SnappingClient)
 	
 /* INFECTION MODIFICATION STRAT ***************************************/
 	int PlayerInfoScore = 0;
-
+	
+	StrToInts(&pClientInfo->m_Clan0, 3, GetClan(SnappingClient));
 	if(GetTeam() == TEAM_SPECTATORS)
 	{
 	}
@@ -233,6 +241,24 @@ void CPlayer::Snap(int SnappingClient)
 			PlayerInfoScore = Server()->RoundStatistics()->PlayerScore(m_ClientID);
 		}
 	}
+	
+	pClientInfo->m_Country = Server()->ClientCountry(m_ClientID);
+
+	if(
+		GameServer()->GetPlayer(SnappingClient) && IsHuman() &&
+		(
+			(Server()->GetClientCustomSkin(SnappingClient) == 1 && SnappingClient == GetCID()) ||
+			(Server()->GetClientCustomSkin(SnappingClient) == 2)
+		)
+	)
+	{
+		StrToInts(&pClientInfo->m_Skin0, 6, m_TeeInfos.m_CustomSkinName);
+	}
+	else StrToInts(&pClientInfo->m_Skin0, 6, m_TeeInfos.m_SkinName);
+	
+	pClientInfo->m_UseCustomColor = m_TeeInfos.m_UseCustomColor;
+	pClientInfo->m_ColorBody = m_TeeInfos.m_ColorBody;
+	pClientInfo->m_ColorFeet = m_TeeInfos.m_ColorFeet;
 /* INFECTION MODIFICATION END *****************************************/
 
 	CNetObj_PlayerInfo *pPlayerInfo = static_cast<CNetObj_PlayerInfo *>(Server()->SnapNewItem(NETOBJTYPE_PLAYERINFO, id, sizeof(CNetObj_PlayerInfo)));
@@ -260,37 +286,6 @@ void CPlayer::Snap(int SnappingClient)
 		pSpectatorInfo->m_X = m_ViewPos.x;
 		pSpectatorInfo->m_Y = m_ViewPos.y;
 	}
-}
-
-void CPlayer::SnapClientInfo(int SnappingClient)
-{
-	CNetObj_ClientInfo *pClientInfo = static_cast<CNetObj_ClientInfo *>(Server()->SnapNewItem(NETOBJTYPE_CLIENTINFO, m_ClientID, sizeof(CNetObj_ClientInfo)));
-
-	if(!pClientInfo)
-		return;
-
-	StrToInts(&pClientInfo->m_Name0, 4, Server()->ClientName(m_ClientID));
-	StrToInts(&pClientInfo->m_Clan0, 3, GetClan(SnappingClient));
-	pClientInfo->m_Country = Server()->ClientCountry(m_ClientID);
-
-	if(
-		GameServer()->GetPlayer(SnappingClient) && IsHuman() &&
-		(
-			(Server()->GetClientCustomSkin(SnappingClient) == 1 && SnappingClient == GetCID()) ||
-			(Server()->GetClientCustomSkin(SnappingClient) == 2)
-		)
-	)
-	{
-		StrToInts(&pClientInfo->m_Skin0, 6, m_TeeInfos.m_CustomSkinName);
-	}
-	else
-	{
-		StrToInts(&pClientInfo->m_Skin0, 6, m_TeeInfos.m_SkinName);
-	}
-
-	pClientInfo->m_UseCustomColor = m_TeeInfos.m_UseCustomColor;
-	pClientInfo->m_ColorBody = m_TeeInfos.m_ColorBody;
-	pClientInfo->m_ColorFeet = m_TeeInfos.m_ColorFeet;
 }
 
 void CPlayer::OnDisconnect(int Type, const char *pReason)
@@ -423,6 +418,18 @@ void CPlayer::SetTeam(int Team, bool DoChatMsg)
 
 void CPlayer::TryRespawn()
 {
+	vec2 SpawnPos;
+
+/* INFECTION MODIFICATION START ***************************************/
+	if(!GameServer()->m_pController->PreSpawn(this, &SpawnPos))
+		return;
+/* INFECTION MODIFICATION END *****************************************/
+
+	m_Spawning = false;
+	m_pCharacter = new(m_ClientID) CCharacter(&GameServer()->m_World, GameServer()->Console());
+	m_pCharacter->Spawn(this, SpawnPos);
+	if(GetClass() != PLAYERCLASS_NONE)
+		GameServer()->CreatePlayerSpawn(SpawnPos);
 }
 
 int CPlayer::GetDefaultEmote() const
@@ -459,6 +466,20 @@ int CPlayer::LastHumanClass() const
 	}
 
 	return m_LastHumanClass;
+}
+
+void CPlayer::Infect(CPlayer *pInfectiousPlayer)
+{
+	StartInfection(/* force */ false, pInfectiousPlayer);
+}
+
+void CPlayer::StartInfection(bool force, CPlayer *pInfectiousPlayer)
+{
+	if(!force && IsZombie())
+		return;
+	
+	m_DoInfection = true;
+	m_InfectiousPlayerCID = pInfectiousPlayer ? pInfectiousPlayer->GetCID() : -1;
 }
 
 bool CPlayer::IsZombie() const
@@ -527,6 +548,38 @@ const char* CPlayer::GetLanguage()
 void CPlayer::SetLanguage(const char* pLanguage)
 {
 	str_copy(m_aLanguage, pLanguage, sizeof(m_aLanguage));
+}
+void CPlayer::OpenMapMenu(int Menu)
+{
+	m_MapMenu = Menu;
+	m_MapMenuTick = 0;
+}
+
+void CPlayer::CloseMapMenu()
+{
+	m_MapMenu = 0;
+	m_MapMenuTick = -1;
+}
+
+bool CPlayer::MapMenuClickable()
+{
+	return (m_MapMenu > 0 && (m_MapMenuTick > Server()->TickSpeed()/2));
+}
+
+float CPlayer::GetGhoulPercent() const
+{
+	return clamp(m_GhoulLevel/static_cast<float>(g_Config.m_InfGhoulStomachSize), 0.0f, 1.0f);
+}
+
+void CPlayer::IncreaseGhoulLevel(int Diff)
+{
+	int NewGhoulLevel = m_GhoulLevel + Diff;
+	if(NewGhoulLevel < 0)
+		NewGhoulLevel = 0;
+	if(NewGhoulLevel > g_Config.m_InfGhoulStomachSize)
+		NewGhoulLevel = g_Config.m_InfGhoulStomachSize;
+	
+	m_GhoulLevel = NewGhoulLevel;
 }
 
 /* INFECTION MODIFICATION END *****************************************/

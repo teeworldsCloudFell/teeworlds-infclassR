@@ -1,7 +1,6 @@
 #include <engine/server/mapconverter.h>
 
 #include <base/color.h>
-#include <game/collision.h>
 #include <game/layers.h>
 #include <game/server/classes.h>
 #include <game/server/infclass/classes/humans/human.h>
@@ -10,7 +9,7 @@
 
 #include <pnglite.h>
 
-enum class DDNET_TILE
+enum DDNET_EXTRA_GAME_TILES
 {
 	TILE_AIR = 0,
 	TILE_SOLID,
@@ -55,14 +54,13 @@ enum class DDNET_TILE
 	TILE_STOPA,
 };
 
-DDNET_TILE GetClientGameTileIndex(int PhysicalIndex, int icDamageIndex, int icBonusIndex)
+int GetClientGameTileIndex(int PhysicalIndex, int icDamageIndex, int icBonusIndex)
 {
 	switch(PhysicalIndex)
 	{
 		case TILE_PHYSICS_SOLID:
-			return DDNET_TILE::TILE_SOLID;
 		case TILE_PHYSICS_NOHOOK:
-			return DDNET_TILE::TILE_NOHOOK;
+			return PhysicalIndex;
 		default:
 			break;
 	}
@@ -70,13 +68,13 @@ DDNET_TILE GetClientGameTileIndex(int PhysicalIndex, int icDamageIndex, int icBo
 	switch(icDamageIndex)
 	{
 		case ZONE_DAMAGE_DEATH:
-			return DDNET_TILE::TILE_DEATH;
+			return TILE_DEATH;
 		case ZONE_DAMAGE_DEATH_NOUNDEAD:
-			return DDNET_TILE::TILE_HIT_DISABLE;
+			return TILE_HIT_DISABLE;
 		case ZONE_DAMAGE_DEATH_INFECTED:
-			return DDNET_TILE::TILE_DUNFREEZE;
+			return TILE_DUNFREEZE;
 		case ZONE_DAMAGE_INFECTION:
-			return DDNET_TILE::TILE_TELEINWEAPON;
+			return TILE_TELEINWEAPON;
 		default:
 			break;
 	}
@@ -84,12 +82,12 @@ DDNET_TILE GetClientGameTileIndex(int PhysicalIndex, int icDamageIndex, int icBo
 	switch(icBonusIndex)
 	{
 		case ZONE_BONUS_BONUS:
-			return DDNET_TILE::TILE_THROUGH_CUT;
+			return TILE_THROUGH_CUT;
 		default:
 			break;
 	}
 
-	return DDNET_TILE::TILE_AIR;
+	return TILE_PHYSICS_AIR;
 }
 
 class CImageInfo
@@ -707,8 +705,7 @@ void CMapConverter::CopyGameLayer()
 			int icDamageIndex = Collision.GetZoneValueAt(ZoneHandle_icDamage, X, Y);
 			int icBonusIndex = Collision.GetZoneValueAt(ZoneHandle_icBonus, X, Y);
 
-			const DDNET_TILE Tile = GetClientGameTileIndex(PhysicalIndex, icDamageIndex, icBonusIndex);
-			m_pTiles[j*m_Width+i].m_Index = static_cast<int>(Tile);
+			m_pTiles[j*m_Width+i].m_Index = GetClientGameTileIndex(PhysicalIndex, icDamageIndex, icBonusIndex);
 
 			i += m_pPhysicsLayerTiles[j*m_Width+i].m_Skip;
 		}

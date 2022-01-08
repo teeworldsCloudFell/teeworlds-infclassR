@@ -18,12 +18,13 @@ enum
 	GROWINGEXPLOSIONEFFECT_LOVE_INFECTED,
 	GROWINGEXPLOSIONEFFECT_BOOM_INFECTED,
 	GROWINGEXPLOSIONEFFECT_HEAL_HUMANS,
+	GROWINGEXPLOSIONEFFECT_HIT_EFFECT,
 };
 
 class CGrowingExplosion : public CInfCEntity
 {
 public:
-	CGrowingExplosion(CGameContext *pGameContext, vec2 Pos, vec2 Dir, int Owner, int Radius, int ExplosionEffect, TAKEDAMAGEMODE TakeDamageMode = TAKEDAMAGEMODE::NOINFECTION);
+	CGrowingExplosion(CGameContext *pGameContext, vec2 Pos, vec2 Dir, int Owner, int Radius, int ExplosionEffect, TAKEDAMAGEMODE TakeDamageMode = TAKEDAMAGEMODE_NOINFECTION);
 	virtual ~CGrowingExplosion();
 
 	virtual void Tick();
@@ -33,6 +34,8 @@ public:
 	int GetActualDamage();
 
 private:
+	void DamagePortals();
+
 	int m_MaxGrowing;
 	int m_GrowingMap_Length;
 	int m_GrowingMap_Size;
