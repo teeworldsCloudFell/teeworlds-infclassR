@@ -22,5 +22,6 @@ src/game/generated
 /infclass_srv*
 /infclass_editor*
 /bin/server_d
+/build/**
 
 /bin/GeoLite2-Country.mmdb

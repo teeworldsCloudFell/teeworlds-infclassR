@@ -1,6 +1,9 @@
 #xgettext --keyword=_ --keyword="_P:1,2" --language=C --from-code=UTF-8 -o ../infclass-translation/infclasspot.po $(find ./src -name \*.cpp -or -name \*.h)
 
-import polib, json, os
+import sys, polib, json, os
+
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
 def ConvertPo2Json(languageCode, plurals):
 	if os.path.isfile("../infclass-translation/infclasspot_"+languageCode+".po"):
@@ -9,24 +12,24 @@ def ConvertPo2Json(languageCode, plurals):
 
 		po = polib.pofile(poFileName)
 
-		f = open(jsonFileName, "w")
+		f = file(jsonFileName, "w")
 
-		print('{"translation":[', end="\n", file=f)
+		print >>f, '{"translation":['
 
 		for entry in po:
 			if entry.msgstr:
-				print('\t{', end="\n", file=f)
-				print('\t\t"key": '+json.dumps(str(entry.msgid))+',', end="\n", file=f)
-				print('\t\t"value": '+json.dumps(str(entry.msgstr))+'', end="\n", file=f)
-				print('\t},', end="\n", file=f)
+				print >>f, '\t{'
+				print >>f, '\t\t"key": '+json.dumps(str(entry.msgid))+','
+				print >>f, '\t\t"value": '+json.dumps(str(entry.msgstr))+''
+				print >>f, '\t},'
 			elif entry.msgstr_plural.keys():
-				print('\t{', end="\n", file=f)
-				print('\t\t"key": '+json.dumps(str(entry.msgid_plural))+',', end="\n", file=f)
+				print >>f, '\t{'
+				print >>f, '\t\t"key": '+json.dumps(str(entry.msgid_plural))+','
 				for index in sorted(entry.msgstr_plural.keys()):
-					print('\t\t"'+plurals[index]+'": '+json.dumps(entry.msgstr_plural[index])+',', end="\n", file=f)
-				print('\t},', end="\n", file=f)
+					print >>f, '\t\t"'+plurals[index]+'": '+json.dumps(entry.msgstr_plural[index])+','
+				print >>f, '\t},'
 
-		print(']}', end="\n", file=f)
+		print >>f, ']}'
 
 ConvertPo2Json("ar", ["zero", "one", "two", "few", "many", "other"])
 ConvertPo2Json("bg", ["one", "other"])

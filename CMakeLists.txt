@@ -3,9 +3,9 @@
 # FindICU introduced in CMake 3.7
 cmake_minimum_required(VERSION 3.7)
 project(InfclassR
-    VERSION 1.3.1
+    VERSION 1.3.0
 )
-set(VERSION_SUFFIX "")
+set(VERSION_SUFFIX "_pre3")
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,11 +42,14 @@ else()
   set(TARGET_ARCH)
 endif()
 
-find_package(MaxMindDB QUIET)
-set(GEOLOCATION_DEFAULT ${MaxMindDB_FOUND})
+set(AUTO_DEPENDENCIES_DEFAULT OFF)
+if(TARGET_OS STREQUAL "windows")
+  set(AUTO_DEPENDENCIES_DEFAULT ON)
+endif()
 
-option(GEOLOCATION "Enable geolocation support" ${GEOLOCATION_DEFAULT})
+option(GEOLOCATION "Enable geolocation support" ON)
 option(MYSQL "Enable mysql support" OFF)
+option(PREFER_BUNDLED_LIBS "Prefer bundled libraries over system libraries" ${AUTO_DEPENDENCIES_DEFAULT})
 
 # Set the default build type to Release
 if(NOT(CMAKE_BUILD_TYPE))
@@ -151,7 +154,7 @@ function(set_glob VAR GLOBBING DIRECTORY) # ...
   list(SORT GLOB_RESULT)
   set(FILES)
   foreach(file ${ARGN})
-    list(APPEND FILES "${DIRECTORY}/${file}")
+    list(APPEND FILES "${PROJECT_SOURCE_DIR}/${DIRECTORY}/${file}")
   endforeach()
 
   if(NOT FILES STREQUAL GLOB_RESULT)
@@ -271,8 +274,6 @@ if(TARGET_OS AND TARGET_OS STREQUAL "mac")
 
   find_program(HDIUTIL hdiutil)
 endif()
-
-find_package(Gettext)
 
 message(STATUS "******** ${CMAKE_PROJECT_NAME} ********")
 message(STATUS "Target OS: ${TARGET_OS} ${TARGET_BITS}bit")
@@ -605,8 +606,6 @@ set_glob(GAME_SERVER GLOB_RECURSE src/game/server
   infclass/entities/hero-flag.h
   infclass/entities/infc-laser.cpp
   infclass/entities/infc-laser.h
-  infclass/entities/infc-placed-object.cpp
-  infclass/entities/infc-placed-object.h
   infclass/entities/infccharacter.cpp
   infclass/entities/infccharacter.h
   infclass/entities/infcentity.cpp
@@ -623,6 +622,10 @@ set_glob(GAME_SERVER GLOB_RECURSE src/game/server
   infclass/entities/merc-laser.h
   infclass/entities/plasma.cpp
   infclass/entities/plasma.h
+  infclass/entities/portal.cpp
+  infclass/entities/portal.h
+  infclass/entities/rocket.cpp
+  infclass/entities/rocket.h
   infclass/entities/scatter-grenade.cpp
   infclass/entities/scatter-grenade.h
   infclass/entities/scientist-laser.cpp
@@ -639,11 +642,11 @@ set_glob(GAME_SERVER GLOB_RECURSE src/game/server
   infclass/entities/turret.h
   infclass/entities/white-hole.cpp
   infclass/entities/white-hole.h
-  infclass/infc_config_variables.h
   infclass/infcgamecontroller.cpp
   infclass/infcgamecontroller.h
   infclass/infcplayer.cpp
   infclass/infcplayer.h
+  changelog.cpp
   classes.h
   entity.cpp
   entity.h
@@ -678,61 +681,6 @@ set(LIBS_SERVER
   # Add pthreads (on non-Windows) at the end, so that other libraries can depend
   # on it.
   ${CMAKE_THREAD_LIBS_INIT}
-)
-
-# Translation dev targets
-set(PO_TEMPlATE "other/po/infclass.pot")
-add_custom_target(dev-generate-pot
-  COMMAND xgettext -d infclass -o ${PO_TEMPlATE} -k_ -k_P:1,2 -k_C:1c,2 -k_CP:1c,2,3 -s --from-code=UTF-8 ${ENGINE_SERVER} ${GAME_SERVER}
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
-add_custom_target(dev-update-po-files)
-
-set(PO_LANGS
-  ar
-  bg
-  cs
-  de
-  el
-  es
-  fa
-  fi
-  fr
-  hr
-  hu
-  it
-  ja
-  la
-  nl
-  pl
-  pt
-  ru
-  sq
-  sr-CS
-  tl
-  tr
-  uk
-  zh-CN
-  zh-TW
-)
-
-foreach(PO_LANG ${PO_LANGS})
-  set(PO_LANG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/other/po/${PO_LANG}/infclass.po")
-  add_custom_command(
-    TARGET dev-update-po-files
-    BYPRODUCTS ${PO_LANG_FILE}
-    COMMAND ${GETTEXT_MSGMERGE_EXECUTABLE} --sort-output --update --backup=off --width=200 ${PO_LANG_FILE} ${PO_TEMPlATE}
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    DEPENDS ${PO_TEMPlATE}
-  )
-endforeach()
-
-add_custom_target(dev-update-json-files)
-add_custom_command(
-  TARGET dev-update-json-files
-  COMMAND ${PYTHON_EXECUTABLE} scripts/translation-python3.py
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 # Target
@@ -810,7 +758,6 @@ install(
 )
 install(
   FILES
-    "ChangeLog.txt"
     "autoexec.cfg"
     "reset.cfg"
   DESTINATION
@@ -824,11 +771,3 @@ install(
   DESTINATION
     "${CMAKE_INSTALL_PREFIX}"
 )
-
-########################################################################
-# COMPILER-SPECIFICS
-########################################################################
-
-foreach(target ${TARGETS_OWN})
-  target_compile_definitions(${target} PRIVATE $<$<CONFIG:Debug>:CONF_DEBUG>)
-endforeach()

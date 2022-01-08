@@ -38,7 +38,7 @@ IncludeCategories:
   - Regex:           '^"'
     Priority:        1
   - Regex:           '^<(engine|game|mastersrv|versionsrv>'
-    Priority:        2
+    Priority:        2a
   - Regex:           '.*'
     Priority:        3
 IncludeIsMainRegex: '$'
